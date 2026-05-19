@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cannabis Strain Network</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script type="text/javascript" src="/static/phylogenetic_tree.js"></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; font-family: Arial, sans-serif; }
+        #sidebar { 
+            width: 400px; 
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #f5f5f5;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        #view-tabs {
+            padding: 10px;
+            background: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+        .tab-button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 4px;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .tab-button:hover {
+            background: rgba(43, 124, 233, 0.1);
+        }
+        .tab-button.active {
+            border-bottom-color: #2B7CE9;
+            color: #2B7CE9;
+            background: white;
+        }
+        #content-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        #search-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+        #main-content {
+            flex: 1;
+            height: 100vh;
+            position: relative;
+        }
+        #network-container { flex-grow: 1; height: 100vh; }
+        .strain-card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section { margin: 15px 0; }
+        pre { white-space: pre-wrap; font-size: 12px; }
+        .tab-button.active {
+            border-bottom-color: #2B7CE9;
+            color: #2B7CE9;
+        }
+        
+        .view {
+            display: none;
+            width: 100%;
+            height: calc(100vh - 40px);
+        }
+        
+        .view.active {
+            display: flex;
+        }
+        
+        #fractal-container {
+            width: 100%;
+            height: 100%;
+            background: white;
+        }
+        
+        /* Add relationship button styles */
+        .relationship-button {
+            flex: 1;
+            padding: 8px 16px;
+            border: 1px solid #2B7CE9;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            background: white;
+            color: #2B7CE9;
+            transition: all 0.3s ease;
+        }
+        
+        .relationship-button.active {
+            background: #2B7CE9;
+            color: white;
+        }
+        
+        .relationship-button:hover {
+            background: #e6f3ff;
+        }
+        
+        .relationship-button.active:hover {
+            background: #1f5aa7;
+        }
+    </style>
+</head>
+<body>
+    <div id="views" style="flex: 1; display: flex;">
+        <div id="sidebar">
+            <div id="view-tabs">
+                <button id="network-tab" class="tab-button active">Network View</button>
+                <button id="fractal-tab" class="tab-button">Phylogenetic Tree</button>
+                <button id="full-tree-tab" class="tab-button">Full Phylogenetic Tree</button>
+            </div>
+            <div id="content-container">
+                <div id="search-container" style="padding: 0 20px 20px 20px;">
+                    <div style="display: flex; gap: 10px;">
+                        <input 
+                            type="text" 
+                            id="search-input" 
+                            placeholder="Search strains..." 
+                            style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                        >
+                        <button 
+                            id="search-button"
+                            style="
+                                padding: 8px 16px;
+                                background: #2B7CE9;
+                                color: white;
+                                border: none;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 14px;
+                            "
+                        >
+                            Search
+                        </button>
+                        <button 
+                            id="reset-search"
+                            style="
+                                padding: 8px 16px;
+                                background: #f0f0f0;
+                                color: #333;
+                                border: 1px solid #ddd;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 14px;
+                            "
+                        >
+                            Reset
+                        </button>
+                    </div>
+                </div>
+                <div id="relationship-type" style="padding: 0 20px 20px 20px;">
+                    <h3 style="margin: 0 0 10px 0;">Relationship Type</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="genetic-toggle" class="relationship-button active">Genetic</button>
+                        <button id="terpene-toggle" class="relationship-button">Terpene</button>
+                    </div>
+                </div>
+                <div id="strain-info">Select a strain to view details</div>
+            </div>
+        </div>
+        <div id="main-content">
+            <div id="network-view" class="view active">
+                <div id="network-container"></div>
+            </div>
+            <div id="fractal-view" class="view" style="display: none;">
+                <div id="fractal-container"></div>
+            </div>
+            <div id="full-tree-view" class="view" style="display: none;">
+                <div id="full-tree-container"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="text/javascript">
+        {{DATA_INITIALIZATION}}
+        
+        // Initialize data and network variables
+        const nodes = new vis.DataSet(window.INITIAL_DATA.nodes);
+        const allRelationships = window.INITIAL_DATA.relationships;
+        const allTerpeneRelationships = window.INITIAL_DATA.terpeneRelationships;
+        const networkState = {
+            currentEdges: new Set(),
+            activeNodes: new Set(),
+            currentRelationType: 'genetic'
+        };
+        
+        // Create network
+        const container = document.getElementById('network-container');
+        const data = {
+            nodes: nodes,
+            edges: new vis.DataSet([])
+        };
+        
+        const options = {
+            nodes: {
+                shape: 'dot',
+                size: 16,
+                font: { 
+                    size: 14,  // Slightly larger font
+                    face: 'arial',
+                    color: '#000000',
+                    strokeWidth: 3,  // Thicker stroke for better readability
+                    strokeColor: '#ffffff'  // White outline around text
+                },
+                borderWidth: 2,
+                shadow: true
+            },
+            edges: {
+                width: 2,
+                smooth: { type: 'continuous' },
+                color: { opacity: 0.5 }
+            },
+            layout: {
+                improvedLayout: true,
+                randomSeed: 42,
+                circular: {
+                    enabled: true,
+                    radius: 800,  // Much larger radius
+                    levelDistance: 300  // More distance between levels
+                }
+            },
+            physics: {
+                enabled: true,
+                stabilization: {
+                    enabled: true,
+                    iterations: 200,
+                    updateInterval: 25
+                },
+                repulsion: {
+                    nodeDistance: 200,  // Minimum distance between nodes
+                    centralGravity: 0.1,
+                    springLength: 300,
+                    springConstant: 0.05,
+                    damping: 0.09
+                }
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 200,
+                zoomView: true,
+                dragView: true,
+                hideEdgesOnDrag: true,
+                hideEdgesOnZoom: true
+            }
+        };
+        
+        const network = new vis.Network(container, data, options);
+        
+        // Disable physics after initial layout
+        network.once('stabilizationIterationsDone', function() {
+            network.setOptions({ physics: { enabled: false } });
+        });
+        
+        // Add zoom buttons and fit button
+        const controls = document.createElement('div');
+        controls.style.cssText = `
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+        `;
+        
+        const zoomIn = document.createElement('button');
+        zoomIn.textContent = '➕';
+        zoomIn.onclick = () => network.moveTo({ scale: network.getScale() * 1.2 });
+        
+        const zoomOut = document.createElement('button');
+        zoomOut.textContent = '➖';
+        zoomOut.onclick = () => network.moveTo({ scale: network.getScale() * 0.8 });
+        
+        const fitButton = document.createElement('button');
+        fitButton.textContent = '⟲';
+        fitButton.onclick = () => network.fit({ animation: true });
+        
+        const physicsButton = document.createElement('button');
+        physicsButton.textContent = '🔄';
+        physicsButton.title = 'Toggle Physics';
+        let physicsEnabled = false;
+        physicsButton.onclick = () => {
+            physicsEnabled = !physicsEnabled;
+            network.setOptions({ 
+                physics: { 
+                    enabled: physicsEnabled,
+                    stabilization: {
+                        enabled: true,
+                        iterations: 100,
+                        updateInterval: 25
+                    },
+                    repulsion: {
+                        nodeDistance: 200,
+                        centralGravity: 0.1,
+                        springLength: 300,
+                        springConstant: 0.05,
+                        damping: 0.09
+                    }
+                } 
+            });
+            physicsButton.style.backgroundColor = physicsEnabled ? '#e6f3ff' : 'white';
+        };
+        
+        [zoomIn, zoomOut, fitButton, physicsButton].forEach(button => {
+            button.style.cssText = `
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                border: none;
+                background: white;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                cursor: pointer;
+                font-size: 18px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background-color 0.3s ease;
+            `;
+            controls.appendChild(button);
+        });
+        
+        document.getElementById('network-container').appendChild(controls);
+        
+        // Add relationship type toggle handlers
+        document.getElementById('genetic-toggle').addEventListener('click', () => {
+            if (networkState.currentRelationType !== 'genetic') {
+                networkState.currentRelationType = 'genetic';
+                updateRelationshipToggle();
+                refreshConnections();
+            }
+        });
+        
+        document.getElementById('terpene-toggle').addEventListener('click', () => {
+            if (networkState.currentRelationType !== 'terpene') {
+                networkState.currentRelationType = 'terpene';
+                updateRelationshipToggle();
+                refreshConnections();
+            }
+        });
+        
+        function updateRelationshipToggle() {
+            document.querySelectorAll('.relationship-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            document.getElementById(`${networkState.currentRelationType}-toggle`).classList.add('active');
+        }
+        
+        function refreshConnections() {
+            // Clear all edges
+            data.edges.clear();
+            networkState.currentEdges.clear();
+            
+            // Refresh connections for all active nodes
+            networkState.activeNodes.forEach(nodeId => {
+                const connections = networkState.currentRelationType === 'genetic' 
+                    ? findConnections(nodeId)
+                    : findTerpeneConnections(nodeId);
+                    
+                connections.forEach(rel => {
+                    const edgeId = `${rel.from}-${rel.to}`;
+                    if (!networkState.currentEdges.has(edgeId)) {
+                        data.edges.add({
+                            id: edgeId,
+                            from: rel.from,
+                            to: rel.to,
+                            value: 1 - rel.distance,
+                            length: rel.distance * 400,
+                            title: `${networkState.currentRelationType === 'genetic' ? 'Genetic' : 'Terpene'} Distance: ${rel.distance.toFixed(3)}`,
+                            color: {
+                                color: networkState.currentRelationType === 'genetic' ? '#2B7CE9' : '#4CAF50',
+                                opacity: Math.max(0.2, 1 - rel.distance)
+                            }
+                        });
+                        networkState.currentEdges.add(edgeId);
+                    }
+                });
+            });
+        }
+        
+        // Update click handler to use network state
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const node = nodes.get(nodeId);
+                
+                if (networkState.activeNodes.has(nodeId)) {
+                    networkState.activeNodes.delete(nodeId);
+                    const edgesToRemove = [];
+                    data.edges.forEach(edge => {
+                        if (edge.from === nodeId || edge.to === nodeId) {
+                            edgesToRemove.push(edge.id);
+                            networkState.currentEdges.delete(edge.id);
+                        }
+                    });
+                    data.edges.remove(edgesToRemove);
+                } else {
+                    networkState.activeNodes.add(nodeId);
+                    const connections = networkState.currentRelationType === 'genetic'
+                        ? findConnections(nodeId)
+                        : findTerpeneConnections(nodeId);
+                    
+                    connections.forEach(rel => {
+                        const edgeId = `${rel.from}-${rel.to}`;
+                        if (!networkState.currentEdges.has(edgeId)) {
+                            data.edges.add({
+                                id: edgeId,
+                                from: rel.from,
+                                to: rel.to,
+                                value: 1 - rel.distance,
+                                length: rel.distance * 400,
+                                title: `${networkState.currentRelationType === 'genetic' ? 'Genetic' : 'Terpene'} Distance: ${rel.distance.toFixed(3)}`,
+                                color: {
+                                    color: networkState.currentRelationType === 'genetic' ? '#2B7CE9' : '#4CAF50',
+                                    opacity: Math.max(0.2, 1 - rel.distance)
+                                }
+                            });
+                            networkState.currentEdges.add(edgeId);
+                        }
+                    });
+                }
+                
+                // Update node appearance
+                nodes.update({
+                    id: nodeId,
+                    color: {
+                        background: networkState.activeNodes.has(nodeId) ? '#ff9999' : (node.complete ? '#2B7CE9' : '#97C2FC'),
+                        border: networkState.activeNodes.has(nodeId) ? '#ff0000' : (node.complete ? '#2B7CE9' : '#97C2FC')
+                    }
+                });
+                
+                // Handle strain data display
+                if (node.complete) {
+                    fetch(`/strain_data/${encodeURIComponent(nodeId)}|${encodeURIComponent(node.rsp)}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                const strainData = data.data;
+                                let chemicalContent = '';
+                                
+                                // Group chemicals by type
+                                const chemicals = {
+                                    cannabinoids: strainData.chemicals.filter(c => c.Type === 'Cannabinoid'),
+                                    terpenes: strainData.chemicals.filter(c => c.Type === 'Terpenoid')
+                                };
+                                
+                                // Build chemical content HTML
+                                if (chemicals.cannabinoids.length > 0) {
+                                    chemicalContent += '<h3>Cannabinoid Content</h3>';
+                                    chemicals.cannabinoids.forEach(chem => {
+                                        chemicalContent += `<div>${chem.Name}: ${chem.Value}</div>`;
+                                    });
+                                }
+                                
+                                if (chemicals.terpenes.length > 0) {
+                                    chemicalContent += '<h3>Terpene Content</h3>';
+                                    chemicals.terpenes.forEach(chem => {
+                                        chemicalContent += `<div>${chem.Name}: ${chem.Value}</div>`;
+                                    });
+                                }
+                                
+                                // Display strain info
+                                document.getElementById('strain-info').innerHTML = `
+                                    <div class="strain-card">
+                                        <h2>${nodeId}</h2>
+                                        <div class="section">
+                                            <h3>General Information</h3>
+                                            <div>RSP: ${node.rsp}</div>
+                                            ${Object.entries(strainData.metadata).map(([key, value]) => 
+                                                `<div>${key}: ${value}</div>`
+                                            ).join('')}
+                                        </div>
+                                        <div class="section">
+                                            <h3>Chemical Content</h3>
+                                            ${chemicalContent}
+                                        </div>
+                                        <div class="section">
+                                            <h3>Genetic Information</h3>
+                                            <pre>${strainData.summary}</pre>
+                                        </div>
+                                        ${networkState.currentRelationType === 'genetic' ? `
+                                            <div class="section">
+                                                <h3>Genetic Relationships</h3>
+                                                ${findConnections(nodeId).map(rel => 
+                                                    `<div>${rel.from === nodeId ? rel.to : rel.from} - Distance: ${rel.distance.toFixed(3)}</div>`
+                                                ).join('')}
+                                            </div>
+                                        ` : `
+                                            <div class="section">
+                                                <h3>Terpene Relationships</h3>
+                                                ${findTerpeneConnections(nodeId).map(rel => 
+                                                    `<div>${rel.from === nodeId ? rel.to : rel.from} - Distance: ${rel.distance.toFixed(3)}</div>`
+                                                ).join('')}
+                                            </div>
+                                        `}
+                                    </div>
+                                `;
+                            } else {
+                                document.getElementById('strain-info').innerHTML = `
+                                    <div class="strain-card">
+                                        <h2>Error</h2>
+                                        <p>Failed to load strain data</p>
+                                    </div>
+                                `;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            document.getElementById('strain-info').innerHTML = `
+                                <div class="strain-card">
+                                    <h2>Error</h2>
+                                    <p>Failed to load strain data: ${error.message}</p>
+                                </div>
+                            `;
+                        });
+                } else {
+                    // Handle incomplete node
+                    document.getElementById('strain-info').innerHTML = `
+                        <div class="strain-card">
+                            <h2>${nodeId}</h2>
+                            <p>RSP: ${node.rsp}</p>
+                            <button onclick="scrapeStrain('${node.rsp}')" class="strain-button">
+                                Scrape Data
+                            </button>
+                        </div>
+                    `;
+                }
+            }
+        });
+        
+        // Remove the old search event listener
+        document.getElementById('search-button').addEventListener('click', performSearch);
+        document.getElementById('reset-search').addEventListener('click', resetSearch);
+        document.getElementById('search-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        function performSearch() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const allNodes = nodes.get();
+            
+            // Show loading cursor
+            document.body.style.cursor = 'wait';
+            
+            // Use setTimeout to prevent UI freeze
+            setTimeout(() => {
+                allNodes.forEach(node => {
+                    const matches = node.label.toLowerCase().includes(searchTerm);
+                    nodes.update({
+                        id: node.id,
+                        opacity: matches ? 1 : 0.2
+                    });
+                });
+                
+                // Reset cursor
+                document.body.style.cursor = 'default';
+                
+                // If in network view, fit to screen to show results
+                if (document.getElementById('network-view').classList.contains('active')) {
+                    network.fit({
+                        animation: {
+                            duration: 500,
+                            easingFunction: 'easeInOutQuad'
+                        }
+                    });
+                }
+            }, 0);
+        }
+
+        function resetSearch() {
+            // Clear search input
+            document.getElementById('search-input').value = '';
+            
+            // Reset all node opacities
+            const allNodes = nodes.get();
+            allNodes.forEach(node => {
+                nodes.update({
+                    id: node.id,
+                    opacity: 1
+                });
+            });
+            
+            // If in network view, fit to screen
+            if (document.getElementById('network-view').classList.contains('active')) {
+                network.fit({
+                    animation: {
+                        duration: 500,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+            }
+        }
+        
+        // Add some CSS for the strain button
+        const style = document.createElement('style');
+        style.textContent = `
+            .strain-button {
+                background: #2B7CE9;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                margin-top: 10px;
+            }
+            .strain-button:hover {
+                background: #1f5aa7;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Add tab switching functionality
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active state from all tabs and views
+                document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.view').forEach(v => {
+                    v.style.display = 'none';
+                    v.classList.remove('active');
+                });
+                
+                // Activate selected tab and view
+                button.classList.add('active');
+                const viewId = button.id.replace('-tab', '-view');
+                const view = document.getElementById(viewId);
+                view.style.display = 'flex';
+                view.classList.add('active');
+                
+                // Render appropriate view
+                if (viewId === 'fractal-view') {
+                    renderFractalView();
+                } else if (viewId === 'full-tree-view') {
+                    const container = document.getElementById('full-tree-container');
+                    renderFullPhylogeneticTree(container, nodes, allRelationships);
+                }
+            });
+        });
+
+        // Update the tab button text
+        document.getElementById('fractal-tab').textContent = 'Phylogenetic Tree';
+
+        // Update the renderFractalView function with phylogenetic tree layout
+        function renderFractalView() {
+            console.log('Rendering phylogenetic tree');
+            const fractalContainer = document.getElementById('fractal-container');
+            fractalContainer.innerHTML = '';
+            
+            if (networkState.activeNodes.size === 0) {
+                fractalContainer.innerHTML = '<div style="padding: 20px; text-align: center;">Please select nodes in the Network View first</div>';
+                return;
+            }
+
+            const fractalNodes = new vis.DataSet();
+            const fractalEdges = new vis.DataSet();
+            const processedNodes = new Set();
+            const processedEdges = new Set();
+            
+            function addNodeToFractal(nodeId, level) {
+                if (level >= 3 || processedNodes.has(nodeId)) return;
+                
+                const node = nodes.get(nodeId);
+                if (!node) return;
+                
+                processedNodes.add(nodeId);
+                
+                // Add node to tree
+                const nodeLabel = (node.label || node.id).replace(/_/g, ' ');
+                fractalNodes.add({
+                    id: `${nodeId}_${level}`,
+                    label: nodeLabel,
+                    level: level,
+                    color: {
+                        background: level === 0 ? '#ff9999' : '#97C2FC',
+                        border: level === 0 ? '#ff0000' : '#2B7CE9'
+                    },
+                    size: 20,
+                    font: {
+                        size: 14,
+                        face: 'arial',
+                        color: '#000000',
+                        strokeWidth: 2,
+                        strokeColor: '#ffffff'
+                    }
+                });
+                
+                // Find relationships
+                const relationships = allRelationships
+                    .filter(rel => {
+                        const isConnected = (rel.from === nodeId || rel.to === nodeId);
+                        const withinDistance = rel.distance < 0.50; // Increased from 0.15 to 0.25
+                        const otherNode = rel.from === nodeId ? rel.to : rel.from;
+                        const hasValidNode = nodes.get(otherNode);
+                        return isConnected && withinDistance && hasValidNode;
+                    })
+                    .sort((a, b) => a.distance - b.distance)
+                    .slice(0, 4); // Increased from 3 to 4 to show more connections
+                
+                relationships.forEach(rel => {
+                    const childId = rel.from === nodeId ? rel.to : rel.from;
+                    if (!processedNodes.has(childId)) {
+                        const edgeKey = [nodeId, childId].sort().join('_');
+                        if (!processedEdges.has(edgeKey)) {
+                            processedEdges.add(edgeKey);
+                            
+                            fractalEdges.add({
+                                id: `edge_${edgeKey}_${level}`,
+                                from: `${nodeId}_${level}`,
+                                to: `${childId}_${level + 1}`,
+                                width: 2,
+                                color: { color: '#2B7CE9', opacity: 0.6 },
+                                title: `Genetic Distance: ${rel.distance.toFixed(3)}`
+                            });
+                            
+                            addNodeToFractal(childId, level + 1);
+                        }
+                    }
+                });
+            }
+            
+            // Start with selected nodes as roots
+            Array.from(networkState.activeNodes).forEach(nodeId => {
+                addNodeToFractal(nodeId, 0);
+            });
+            
+            // Create the network with improved layout
+            const fractalNetwork = new vis.Network(fractalContainer, {
+                nodes: fractalNodes,
+                edges: fractalEdges
+            }, {
+                physics: false,
+                layout: {
+                    hierarchical: {
+                        enabled: true,
+                        direction: 'LR',
+                        sortMethod: 'directed',
+                        levelSeparation: 120,    // Horizontal spacing between levels
+                        nodeSpacing: 120,        // Vertical spacing between nodes
+                        treeSpacing: 120,        // Spacing between subtrees
+                        blockShifting: false,
+                        edgeMinimization: true,
+                        parentCentralization: true
+                    }
+                },
+                nodes: {
+                    shape: 'dot',
+                    scaling: {
+                        min: 20,
+                        max: 30
+                    },
+                    font: {
+                        size: 14,
+                        face: 'arial',
+                        strokeWidth: 2,
+                        strokeColor: '#ffffff'
+                    }
+                },
+                edges: {
+                    smooth: {
+                        type: 'straightCross',
+                        roundness: 0.2
+                    }
+                },
+                interaction: {
+                    dragNodes: false,
+                    dragView: true,
+                    zoomView: true,
+                    hover: true
+                }
+            });
+
+            // Add controls
+            const fractalControls = document.createElement('div');
+            fractalControls.style.cssText = `
+                position: absolute;
+                bottom: 20px;
+                right: 20px;
+                display: flex;
+                gap: 10px;
+            `;
+            
+            const fitButton = document.createElement('button');
+            fitButton.textContent = '⟲';
+            fitButton.title = 'Fit to View';
+            fitButton.onclick = () => fractalNetwork.fit({ animation: true });
+            fitButton.style.cssText = `
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                border: none;
+                background: white;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                cursor: pointer;
+                font-size: 18px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            `;
+            
+            fractalControls.appendChild(fitButton);
+            fractalContainer.appendChild(fractalControls);
+            
+            // Initial fit to view
+            setTimeout(() => fractalNetwork.fit(), 100);
+        }
+
+        function findConnections(nodeId, initialThreshold = 0.2) {
+            let threshold = initialThreshold;
+            let connections = [];
+            
+            while (threshold <= 1.0) {
+                connections = allRelationships.filter(rel => {
+                    return (rel.from === nodeId || rel.to === nodeId) && rel.distance <= threshold;
+                }).sort((a, b) => a.distance - b.distance);
+                
+                if (connections.length > 0) {
+                    break;
+                }
+                threshold += 0.1;
+            }
+            
+            return connections;
+        }
+        
+        function findTerpeneConnections(nodeId, initialThreshold = 0.2) {
+            let threshold = initialThreshold;
+            let connections = [];
+            
+            while (threshold <= 1.0) {
+                connections = allTerpeneRelationships.filter(rel => {
+                    return (rel.from === nodeId || rel.to === nodeId) && rel.distance <= threshold;
+                }).sort((a, b) => a.distance - b.distance);
+                
+                if (connections.length > 0) {
+                    break;
+                }
+                threshold += 0.1;
+            }
+            
+            return connections;
+        }
+
+        // Add this function before the network click handler
+        async function scrapeStrain(rsp) {
+            if (!rsp) {
+                console.error('No RSP number provided');
+                return;
+            }
+            
+            try {
+                // Show loading state
+                document.getElementById('strain-info').innerHTML = `
+                    <div class="strain-card">
+                        <h2>Scraping Data...</h2>
+                        <p>Please wait while we fetch the data for RSP: ${rsp}</p>
+                    </div>
+                `;
+                
+                // Call the scraping endpoint
+                const response = await fetch(`/scrape/${rsp}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Find all nodes with this RSP number and update them
+                    const allNodes = nodes.get();
+                    const nodesToUpdate = allNodes.filter(node => node.rsp === rsp);
+                    
+                    nodesToUpdate.forEach(node => {
+                        nodes.update({
+                            id: node.id,
+                            complete: true,
+                            color: {
+                                background: '#2B7CE9',
+                                border: '#2B7CE9'
+                            }
+                        });
+                        
+                        // If this node is in activeNodes, update the network view
+                        if (networkState.activeNodes.has(node.id)) {
+                            refreshConnections();
+                        }
+                    });
+                    
+                    // Display the scraped data
+                    const strainData = data.data;
+                    let chemicalContent = '';
+                    
+                    // Group chemicals by type
+                    const chemicals = {
+                        cannabinoids: strainData.chemicals.filter(c => c.Type === 'Cannabinoid'),
+                        terpenes: strainData.chemicals.filter(c => c.Type === 'Terpenoid')
+                    };
+                    
+                    // Build chemical content HTML
+                    if (chemicals.cannabinoids.length > 0) {
+                        chemicalContent += '<h3>Cannabinoid Content</h3>';
+                        chemicals.cannabinoids.forEach(chem => {
+                            chemicalContent += `<div>${chem.Name}: ${chem.Value}</div>`;
+                        });
+                    }
+                    
+                    if (chemicals.terpenes.length > 0) {
+                        chemicalContent += '<h3>Terpene Content</h3>';
+                        chemicals.terpenes.forEach(chem => {
+                            chemicalContent += `<div>${chem.Name}: ${chem.Value}</div>`;
+                        });
+                    }
+                    
+                    // Display strain info
+                    document.getElementById('strain-info').innerHTML = `
+                        <div class="strain-card">
+                            <h2>${data.strain_name}</h2>
+                            <div class="section">
+                                <h3>General Information</h3>
+                                <div>RSP: ${rsp}</div>
+                                ${Object.entries(strainData.metadata).map(([key, value]) => 
+                                    `<div>${key}: ${value}</div>`
+                                ).join('')}
+                            </div>
+                            <div class="section">
+                                <h3>Chemical Content</h3>
+                                ${chemicalContent}
+                            </div>
+                            <div class="section">
+                                <h3>Genetic Information</h3>
+                                <pre>${strainData.summary}</pre>
+                            </div>
+                            ${networkState.currentRelationType === 'genetic' ? `
+                                <div class="section">
+                                    <h3>Genetic Relationships</h3>
+                                    ${findConnections(data.strain_name).map(rel => 
+                                        `<div>${rel.from === data.strain_name ? rel.to : rel.from} - Distance: ${rel.distance.toFixed(3)}</div>`
+                                    ).join('')}
+                                </div>
+                            ` : `
+                                <div class="section">
+                                    <h3>Terpene Relationships</h3>
+                                    ${findTerpeneConnections(data.strain_name).map(rel => 
+                                        `<div>${rel.from === data.strain_name ? rel.to : rel.from} - Distance: ${rel.distance.toFixed(3)}</div>`
+                                    ).join('')}
+                                </div>
+                            `}
+                        </div>
+                    `;
+                } else {
+                    throw new Error(data.error || 'Failed to scrape data');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('strain-info').innerHTML = `
+                    <div class="strain-card">
+                        <h2>Error</h2>
+                        <p>Failed to scrape data: ${error.message}</p>
+                        <button onclick="scrapeStrain('${rsp}')" class="strain-button">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 

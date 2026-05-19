@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cannabis Researcher — Strain Network</title>
+  <meta name="description" content="Interactive cannabis strain network visualization with genetic and terpene analysis">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <div id="sidebar">
+      <div class="sidebar-header">
+        <h1>Cannabis Researcher</h1>
+        <div class="subtitle">Strain Network Explorer</div>
+      </div>
+
+      <div class="search-wrap">
+        <input type="text" class="search-input" id="search-input" placeholder="Search strains by name...">
+      </div>
+
+      <div class="view-tabs">
+        <button class="tab-btn active" data-view="network">Network</button>
+        <button class="tab-btn" data-view="tree">Phylo Tree</button>
+        <button class="tab-btn" data-view="full-tree">Full Tree</button>
+      </div>
+
+      <div class="relation-toggle">
+        <button class="rel-btn active-genetic" data-rel="genetic">Genetic</button>
+        <button class="rel-btn" data-rel="terpene">Terpene</button>
+        <button class="rel-btn" data-rel="combined">Combined</button>
+      </div>
+
+      <div id="strain-panel">
+        <div class="empty-state">
+          <div class="icon">🌿</div>
+          <div>Click a node to view strain details</div>
+          <div style="font-size:11px;margin-top:4px">Use search to find specific strains</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Graph Area -->
+    <div id="main-area">
+      <div class="stats-bar" id="stats-bar"></div>
+      <div class="graph-container" id="graph-container"></div>
+      <div class="graph-controls">
+        <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in">+</button>
+        <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out">−</button>
+        <button class="ctrl-btn" id="btn-fit" title="Fit to view">⟲</button>
+        <button class="ctrl-btn" id="btn-physics" title="Toggle physics">⚡</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/static/phylogenetic_tree.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
