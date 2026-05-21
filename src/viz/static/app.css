@@ -6,6 +6,7 @@
   --bg-secondary: #12121e;
   --bg-card: rgba(22, 22, 38, 0.85);
   --bg-hover: rgba(30, 30, 50, 0.9);
+  --surface: #141424;
   --border: rgba(255, 255, 255, 0.06);
   --text-primary: #e8e8f0;
   --text-secondary: #8888a0;
@@ -93,6 +94,7 @@ body {
 .search-wrap {
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
+  position: relative;
 }
 
 .search-input {
@@ -110,6 +112,95 @@ body {
 
 .search-input::placeholder { color: var(--text-muted); }
 .search-input:focus { border-color: var(--accent-cyan); }
+
+/* Search results dropdown */
+.search-results {
+  display: none;
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: calc(100% - 4px);
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(20px);
+}
+
+.search-results.active { display: block; }
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: all var(--transition);
+}
+
+.search-result-item:last-child { border-bottom: none; }
+.search-result-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  padding-left: 18px;
+}
+
+.search-result-name {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.search-result-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.search-result-rsp {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.search-result-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.search-result-badge.complete {
+  background: rgba(0,210,255,0.15);
+  color: var(--accent-cyan);
+}
+
+.search-result-badge.terpenes {
+  background: rgba(0,200,83,0.15);
+  color: var(--accent-green);
+}
+
+.search-result-badge.seedfinder {
+  background: rgba(239,83,80,0.15);
+  color: #ef5350;
+  border: 1px solid rgba(239,83,80,0.3);
+}
+
+.search-result-badge.forum {
+  background: rgba(156, 39, 176, 0.15);
+  color: #ab47bc;
+  border: 1px solid rgba(156, 39, 176, 0.3);
+}
+
+.search-no-results {
+  padding: 16px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 
 /* ── View Tabs ── */
 .view-tabs {
@@ -456,3 +547,243 @@ body {
 }
 
 .toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── Grower Observations & Forum Notes ── */
+.observation-quote-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.observation-quote {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.quote-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.quote-footer a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+}
+
+.quote-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ── Image Gallery (Clustered) ── */
+.image-cluster-group {
+  margin-bottom: 16px;
+}
+
+.cluster-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-orange);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.image-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.gallery-image-card {
+  position: relative;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.gallery-img {
+  width: 100%;
+  height: 90px;
+  object-fit: cover;
+  transition: transform var(--transition);
+}
+
+.gallery-image-card:hover .gallery-img {
+  transform: scale(1.08);
+}
+
+.img-meta {
+  padding: 4px 6px;
+  font-size: 9px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.img-meta span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80%;
+}
+
+.source-link-icon {
+  font-size: 10px;
+  text-decoration: none;
+  color: var(--accent-cyan);
+}
+
+/* ── Grower Observations & Forum Notes (Enhanced) ── */
+.observation-quote-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 12px;
+  transition: all var(--transition);
+}
+
+.observation-quote-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.observation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.observation-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.observation-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.observation-quote {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-style: italic;
+  white-space: pre-line;
+}
+
+.expand-btn {
+  background: none;
+  border: none;
+  color: var(--accent-cyan);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-bottom: 8px;
+  display: block;
+  transition: color var(--transition);
+  text-align: left;
+}
+
+.expand-btn:hover {
+  color: #00b0ff;
+  text-decoration: underline;
+}
+
+/* ── Cultivar Family Tree Styles ── */
+.family-tree-card {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.family-tree-card::-webkit-scrollbar {
+  height: 4px;
+}
+.family-tree-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+.family-tree-card::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 2px;
+}
+
+.family-tree-container {
+  min-width: 100%;
+}
+
+.tree-viewport {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 36px;
+  min-width: max-content;
+  padding: 10px 5px;
+}
+
+.tree-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 16px;
+}
+
+.tree-node {
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-primary);
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  transition: all var(--transition);
+  cursor: pointer;
+  user-select: none;
+  min-width: 105px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-node.active-node {
+  background: rgba(0, 210, 255, 0.12);
+  border-color: var(--accent-cyan);
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.2);
+}
+
+.tree-node:hover {
+  border-color: var(--accent-cyan);
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+
+.empty-tree-state {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 12px 0;
+}
+

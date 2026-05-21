@@ -16,7 +16,7 @@ COPY main.py .
 COPY src/ src/
 
 # Expose port
-EXPOSE 8002
+EXPOSE 8005
 
 # Run the app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]

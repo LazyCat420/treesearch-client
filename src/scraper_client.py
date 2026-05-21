@@ -3,6 +3,7 @@ scraper_client.py
 -----------------
 Client to communicate with the scraper-service for data collection.
 """
+import os
 import httpx
 import logging
 from typing import Any, Dict, List, Optional
@@ -10,9 +11,27 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 class ScraperClient:
-    def __init__(self, base_url: str = "http://localhost:8001"):
+    def __init__(self, base_url: Optional[str] = None):
+        if not base_url:
+            base_url = os.getenv("SCRAPER_SERVICE_URL", "http://localhost:8001")
         self.base_url = base_url.rstrip("/")
         self.client = httpx.AsyncClient(timeout=60.0)
+
+    async def scrape(self, url: str, engine: str = "playwright", options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Call the /scrape endpoint of the scraper service."""
+        url_endpoint = f"{self.base_url}/scrape"
+        payload = {
+            "url": url,
+            "engine": engine,
+            "options": options or {}
+        }
+        try:
+            response = await self.client.post(url_endpoint, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error calling scraper-service scrape: {e}")
+            return {"success": False, "error": str(e), "content": None}
 
     async def collect(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Call the /collect endpoint."""

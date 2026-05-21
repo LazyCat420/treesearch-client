@@ -11,19 +11,63 @@ from datetime import datetime
 
 from src.scraper_client import ScraperClient
 from src.db import get_session, init_db
-from src.models.orm import ObservationORM
+from src.models.orm import ObservationORM, ObservationImageORM
 
 logger = logging.getLogger(__name__)
 
-# List of cannabis strains to try and match in titles (basic extraction)
-KNOWN_STRAINS = ["Blueberry", "White Widow", "Sour Diesel", "OG Kush", "Goji OG", "Northern Lights", "Haze", "Skunk"]
+# Fallback cannabis strains to try and match if DB is empty
+KNOWN_STRAINS = [
+    "Jack Herer", "Blueberry", "White Widow", "Sour Diesel", 
+    "OG Kush", "Goji OG", "Northern Lights", "Haze", "Skunk", 
+    "Girl Scout Cookies", "GSC", "Gelato", "Runtz", "Gorilla Glue"
+]
 
-def extract_strain_from_title(title: str) -> str:
-    """Basic extraction of a strain name from a post title."""
+async def load_all_known_strains(session) -> dict[str, str]:
+    """Query all canonical strain names and aliases from database.
+    Returns a dictionary mapping strain_name_lowercase -> canonical_strain_id.
+    """
+    from src.models.orm import CanonicalStrainORM, StrainAliasORM
+    from sqlalchemy import select
+    
+    strains_map = {}
+    try:
+        # 1. Load canonical strains
+        stmt = select(CanonicalStrainORM)
+        canonical = (await session.execute(stmt)).scalars().all()
+        for cs in canonical:
+            strains_map[cs.name.lower()] = cs.id
+            
+        # 2. Load aliases
+        stmt = select(StrainAliasORM)
+        aliases = (await session.execute(stmt)).scalars().all()
+        for alias in aliases:
+            strains_map[alias.name.lower()] = alias.canonical_strain_id
+    except Exception as e:
+        logger.warning(f"Could not load strain names from DB (bootstrapping?): {e}")
+        
+    return strains_map
+
+def match_strain(title: str, body: str, strains_map: dict[str, str]) -> tuple[str, str | None]:
+    """Scan title and body for strain names or aliases using word boundaries.
+    Returns a tuple of (reported_strain_name, canonical_strain_id).
+    """
+    text = f"{title} {body}".lower()
+    
+    if strains_map:
+        # Sort keys by length descending to match longer multi-word names first
+        sorted_names = sorted(strains_map.keys(), key=len, reverse=True)
+        for name in sorted_names:
+            pattern = r'\b' + re.escape(name) + r'\b'
+            if re.search(pattern, text):
+                return name.title(), strains_map[name]
+    
+    # Fallback to hardcoded list
     for strain in KNOWN_STRAINS:
-        if strain.lower() in title.lower():
-            return strain
-    return ""
+        pattern = r'\b' + re.escape(strain.lower()) + r'\b'
+        if re.search(pattern, text):
+            return strain, None
+            
+    return "", None
 
 async def ingest_discourse(client: ScraperClient, base_url: str, forum_name: str, tags: list[str]):
     """Ingest Discourse topics by tags."""
@@ -54,6 +98,9 @@ async def _save_posts(posts: list[dict], source_name: str):
         return
         
     async for session in get_session():
+        # Load strain names for dynamic mapping
+        strains_map = await load_all_known_strains(session)
+        
         saved = 0
         for p in posts:
             # Check if exists
@@ -66,7 +113,13 @@ async def _save_posts(posts: list[dict], source_name: str):
             created_at_str = p.get("created_at")
             dt = datetime.fromisoformat(created_at_str).replace(tzinfo=None) if created_at_str else datetime.utcnow()
             
-            strain_name = extract_strain_from_title(p.get("title", ""))
+            title = p.get("title", "")
+            body = p.get("body", "")
+            strain_name, canonical_id = match_strain(title, body, strains_map)
+
+            # Skip if we can't associate with any strain name
+            if not strain_name:
+                continue
 
             obs = ObservationORM(
                 source_name=source_name,
@@ -75,9 +128,20 @@ async def _save_posts(posts: list[dict], source_name: str):
                 author=p.get("author"),
                 observed_at=dt,
                 reported_strain_name=strain_name,
-                raw_text=f"Title: {p.get('title')}\n\n{p.get('body')}"
+                canonical_strain_id=canonical_id,
+                raw_text=f"Title: {title}\n\n{body}"
             )
             session.add(obs)
+            
+            # Save associated images
+            image_urls = p.get("image_urls", [])
+            for url in image_urls:
+                img_orm = ObservationImageORM(
+                    observation_id=obs.id,
+                    image_url=url
+                )
+                session.add(img_orm)
+                
             saved += 1
             
         if saved > 0:

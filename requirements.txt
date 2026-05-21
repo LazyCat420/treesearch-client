@@ -14,3 +14,8 @@ httpx>=0.25.0
 
 # Static file serving
 aiofiles>=23.2.0
+
+# Database
+SQLAlchemy>=2.0.23
+asyncpg>=0.29.0
+greenlet>=3.5.0

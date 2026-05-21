@@ -217,30 +217,106 @@
   }
 
   // ── Strain Detail Panel ──
-  async function loadStrainDetail(strainName) {
+  async function loadStrainDetail(strainName, source, strainSlug, breederSlug, realName) {
     const panel = document.getElementById('strain-panel');
     panel.innerHTML = `<div class="empty-state"><div class="loading-spinner"></div><div>Loading...</div></div>`;
 
     try {
-      const resp = await fetch(`/api/strains/${encodeURIComponent(strainName)}/detail`);
+      let resp;
+      if (source === 'seedfinder' || source === 'forum') {
+        panel.innerHTML = `<div class="empty-state"><div class="loading-spinner"></div><div>Scraping & Aggregating details for ${realName}...</div></div>`;
+        resp = await fetch('/api/strains/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strain_slug: strainSlug, breeder_slug: breederSlug })
+        });
+      } else {
+        resp = await fetch(`/api/strains/${encodeURIComponent(strainName)}/detail`);
+      }
       if (!resp.ok) throw new Error('Not found');
       const d = await resp.json();
       panel.innerHTML = renderStrainCard(d);
-    } catch {
+      if (typeof renderLineageTree === 'function') {
+        renderLineageTree(d.name, d.lineage);
+      }
+
+      if (source === 'seedfinder' || source === 'forum') {
+        // Trigger a reload of network data so the newly imported strain node appears in the visualization
+        try {
+          const ndResp = await fetch('/api/network-data');
+          if (ndResp.ok) {
+            const ndData = await ndResp.json();
+            state.allNodes = ndData.nodes || [];
+            state.allRelationships = ndData.relationships || [];
+            state.allTerpeneRels = ndData.terpeneRelationships || [];
+            renderStats();
+            if (state.currentView === 'network') {
+              buildGraph();
+              // Try to select the node
+              const targetNodeId = d.name;
+              if (state.nodes && state.network) {
+                state.network.selectNodes([targetNodeId]);
+                state.network.focus(targetNodeId, { scale: 1.5, animation: true });
+              }
+            }
+          }
+        } catch (ndErr) {
+          console.error('Failed to update network graph:', ndErr);
+        }
+      }
+    } catch (err) {
       // Fallback for strains with no sample data
-      const node = state.nodes.get(strainName);
+      const node = state.nodes ? state.nodes.get(strainName) : null;
       panel.innerHTML = renderBasicCard(strainName, node);
+      if (typeof renderLineageTree === 'function') {
+        renderLineageTree(strainName, null);
+      }
     }
   }
+
+
 
   function renderStrainCard(d) {
     let html = `<div class="strain-card">
       <h2>${(d.name || '').replace(/_/g, ' ')}</h2>
       ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : ''}`;
 
-    // Metadata
+    // Strain-level info (breeder, type, description) — always available
+    const hasStrainInfo = d.description || d.strain_type || d.breeder || (d.lineage && Object.keys(d.lineage).length);
+    if (hasStrainInfo) {
+      html += `<div class="card-section"><h3>Strain Information</h3><div class="meta-grid">`;
+      if (d.breeder) html += `<div class="meta-item"><div class="label">Breeder</div><div class="value">${d.breeder}</div></div>`;
+      if (d.strain_type) html += `<div class="meta-item"><div class="label">Type</div><div class="value">${d.strain_type}</div></div>`;
+      if (d.avg_flowering_days) html += `<div class="meta-item"><div class="label">Flowering</div><div class="value">${d.avg_flowering_days} days</div></div>`;
+      html += `</div>`;
+      if (d.description) html += `<p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin-top:8px">${d.description}</p>`;
+      if (d.lineage) {
+        let lineageText = '';
+        if (Array.isArray(d.lineage)) {
+          lineageText = d.lineage.map(p => typeof p === 'object' ? p.name : p).join(' × ');
+        } else if (typeof d.lineage === 'object' && Object.keys(d.lineage).length > 0) {
+          lineageText = Object.entries(d.lineage).map(([k, v]) => k + (v ? ': ' + v : '')).join(' × ');
+        } else if (typeof d.lineage === 'string' && d.lineage.toLowerCase() !== 'unknown') {
+          lineageText = d.lineage;
+        }
+        if (lineageText) {
+          html += `<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">Lineage:</span> <span style="color:var(--text-secondary);font-size:12px">${lineageText}</span></div>`;
+        }
+      }
+      
+      // Cultivar Family Tree visual placeholder
+      html += `<div class="card-section">
+        <h3>Cultivar Family Tree</h3>
+        <div class="family-tree-card" id="family-tree-card">
+          <div class="empty-tree-state">Building family tree...</div>
+        </div>
+      </div>`;
+      html += `</div>`;
+    }
+
+    // Genomic sample metadata (from Kannapedia)
     if (d.metadata && Object.values(d.metadata).some(v => v)) {
-      html += `<div class="card-section"><h3>General Information</h3><div class="meta-grid">`;
+      html += `<div class="card-section"><h3>Genomic Sample Data</h3><div class="meta-grid">`;
       const fields = [
         ['Grower', d.metadata.grower],
         ['Sex', d.metadata.reported_sex],
@@ -287,6 +363,84 @@
       html += `</div>`;
     }
 
+    // Plant Pictures Gallery (Clustered)
+    if (d.observations && d.observations.some(obs => obs.images && obs.images.length)) {
+      const allImages = [];
+      d.observations.forEach(obs => {
+        if (obs.images) {
+          obs.images.forEach(img => {
+            allImages.push({
+              ...img,
+              author: obs.author,
+              source_name: obs.source_name,
+              source_url: obs.source_url,
+              observed_at: obs.observed_at,
+            });
+          });
+        }
+      });
+
+      const clusters = {};
+      allImages.forEach(img => {
+        const cid = img.cluster_id || 'unclustered';
+        if (!clusters[cid]) {
+          clusters[cid] = [];
+        }
+        clusters[cid].push(img);
+      });
+
+      html += `<div class="card-section"><h3>Plant Pictures (Clustered)</h3>`;
+      Object.entries(clusters).forEach(([clusterId, imgs]) => {
+        const title = clusterId === 'unclustered' ? 'Unclustered' : `Cluster ${clusterId}`;
+        html += `<div class="image-cluster-group">
+          <div class="cluster-header">${title} (${imgs.length})</div>
+          <div class="image-gallery-grid">`;
+        imgs.forEach(img => {
+          html += `<div class="gallery-image-card">
+            <img src="${img.image_url}" alt="Strain image" onerror="this.src='https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=300'" class="gallery-img" />
+            <div class="img-meta">
+              <span>By ${img.author || 'Anonymous'}</span>
+              ${img.source_url ? `<a href="${img.source_url}" target="_blank" class="source-link-icon" title="View Source Post">🔗</a>` : ''}
+            </div>
+          </div>`;
+        });
+        html += `</div></div>`;
+      });
+      html += `</div>`;
+    }
+
+    // Grower Observations & Forum Notes (Enhanced & Expandable)
+    if (d.observations && d.observations.length) {
+      html += `<div class="card-section"><h3>Grow Reports & Observations</h3>`;
+      d.observations.forEach((obs, idx) => {
+        let text = obs.raw_text || '';
+        const titleMatch = text.match(/^Title:\s*(.*?)\n\n/i);
+        const title = titleMatch ? titleMatch[1] : '';
+        text = text.replace(/^Title:.*?\n\n/i, '').trim();
+        
+        const isLong = text.length > 200;
+        const shortText = isLong ? text.substring(0, 200) + '...' : text;
+        
+        const escapedFull = escapeHtml(text);
+        const escapedShort = escapeHtml(shortText);
+        const displayDate = obs.observed_at ? new Date(obs.observed_at).toLocaleDateString() : '';
+        
+        html += `<div class="observation-quote-card">
+          <div class="observation-header">
+            <span class="observation-title">${escapeHtml(title || 'Observation Note')}</span>
+            <span class="observation-date">${displayDate}</span>
+          </div>
+          <blockquote class="observation-quote" id="obs-text-${idx}" data-full="${escapedFull}" data-short="${escapedShort}">"${isLong ? escapedShort : escapedFull}"</blockquote>
+          ${isLong ? `<button class="expand-btn" data-idx="${idx}">Show More</button>` : ''}
+          <div class="quote-footer">
+            <span class="author">— ${escapeHtml(obs.author || 'Anonymous')}</span>
+            <span class="source">via <a href="${obs.source_url || '#'}" target="_blank">${escapeHtml(obs.source_name || 'Source')}</a></span>
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
     // Genetic neighbors
     const neighbors = state.relType === 'terpene' ? d.terpene_neighbors : d.genetic_neighbors;
     if (neighbors && neighbors.length) {
@@ -313,11 +467,18 @@
   }
 
   function renderBasicCard(name, node) {
+    const status = node && node.complete ? 'Complete' : 'Community data only — no genomic sample';
     return `<div class="strain-card">
       <h2>${(name || '').replace(/_/g, ' ')}</h2>
       ${node && node.rsp ? `<span class="rsp-badge">${node.rsp}</span>` : ''}
       <div class="card-section">
-        <div class="meta-item"><div class="label">Status</div><div class="value">${node && node.complete ? 'Complete' : 'Incomplete — needs scraping'}</div></div>
+        <div class="meta-item"><div class="label">Status</div><div class="value">${status}</div></div>
+      </div>
+      <div class="card-section">
+        <h3>Cultivar Family Tree</h3>
+        <div class="family-tree-card" id="family-tree-card">
+          <div class="empty-tree-state">Building family tree...</div>
+        </div>
       </div>
     </div>`;
   }
@@ -351,7 +512,7 @@
       state.network.fit({ animation: { duration: 400 } }));
     document.getElementById('btn-physics').addEventListener('click', togglePhysics);
 
-    // Neighbor click delegation
+    // Click delegation for neighbor items and expand buttons
     document.getElementById('strain-panel').addEventListener('click', e => {
       const item = e.target.closest('.neighbor-item');
       if (item) {
@@ -362,22 +523,166 @@
         } else {
           loadStrainDetail(name);
         }
+        return;
+      }
+      
+      const expandBtn = e.target.closest('.expand-btn');
+      if (expandBtn) {
+        const card = expandBtn.closest('.observation-quote-card');
+        const quote = card.querySelector('.observation-quote');
+        const isExpanded = card.classList.toggle('expanded');
+        
+        if (isExpanded) {
+          quote.textContent = `"${quote.dataset.full}"`;
+          expandBtn.textContent = 'Show Less';
+        } else {
+          quote.textContent = `"${quote.dataset.short}"`;
+          expandBtn.textContent = 'Show More';
+        }
       }
     });
   }
 
   // ── Search ──
+  let searchAbortController = null;
+
   function performSearch(term) {
     const lower = term.toLowerCase().trim();
+    const resultsEl = document.getElementById('search-results');
+
+    // Always filter graph nodes visually
+    if (state.nodes) {
+      const allNodes = state.nodes.get();
+      const updates = [];
+      allNodes.forEach(n => {
+        const currentOpacity = n.opacity !== undefined ? n.opacity : 1;
+        const targetOpacity = !lower ? 1 : (n.label.toLowerCase().includes(lower) ? 1 : 0.15);
+        if (currentOpacity !== targetOpacity) {
+          updates.push({ id: n.id, opacity: targetOpacity });
+        }
+      });
+      if (updates.length > 0) {
+        state.nodes.update(updates);
+      }
+    }
+
+    // If empty, hide dropdown
     if (!lower) {
-      state.nodes.get().forEach(n => state.nodes.update({ id: n.id, opacity: 1 }));
+      resultsEl.classList.remove('active');
+      resultsEl.replaceChildren();
       return;
     }
-    state.nodes.get().forEach(n => {
-      const match = n.label.toLowerCase().includes(lower);
-      state.nodes.update({ id: n.id, opacity: match ? 1 : 0.15 });
-    });
+
+    // Query the API for matching strains
+    if (searchAbortController) searchAbortController.abort();
+    searchAbortController = new AbortController();
+
+    fetch('/api/strains?search=' + encodeURIComponent(lower), {
+      signal: searchAbortController.signal,
+    })
+      .then(r => r.json())
+      .then(data => {
+        resultsEl.replaceChildren();
+        const strains = data.strains || [];
+        if (strains.length === 0) {
+          const noResults = document.createElement('div');
+          noResults.className = 'search-no-results';
+          noResults.textContent = 'No strains found for "' + term.trim() + '"';
+          resultsEl.appendChild(noResults);
+        } else {
+          strains.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'search-result-item';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'search-result-name';
+            nameSpan.textContent = (s.name || '').replace(/_/g, ' ');
+            item.appendChild(nameSpan);
+
+            const metaDiv = document.createElement('span');
+            metaDiv.className = 'search-result-meta';
+
+            if (s.rsp) {
+              const rspSpan = document.createElement('span');
+              rspSpan.className = 'search-result-rsp';
+              rspSpan.textContent = s.rsp;
+              metaDiv.appendChild(rspSpan);
+            }
+
+            if (s.complete) {
+              const badge = document.createElement('span');
+              badge.className = 'search-result-badge complete';
+              badge.textContent = 'Complete';
+              metaDiv.appendChild(badge);
+            }
+
+            if (s.has_terpenes) {
+              const badge = document.createElement('span');
+              badge.className = 'search-result-badge terpenes';
+              badge.textContent = 'Terpenes';
+              metaDiv.appendChild(badge);
+            }
+
+            if (s.source === 'seedfinder') {
+              const badge = document.createElement('span');
+              badge.className = 'search-result-badge seedfinder';
+              badge.textContent = 'SeedFinder';
+              metaDiv.appendChild(badge);
+            }
+
+            if (s.source === 'forum') {
+              const badge = document.createElement('span');
+              badge.className = 'search-result-badge forum';
+              badge.textContent = 'Forums';
+              metaDiv.appendChild(badge);
+            }
+
+            item.appendChild(metaDiv);
+
+            item.addEventListener('click', () => {
+              resultsEl.classList.remove('active');
+              resultsEl.replaceChildren();
+              
+              if (s.source === 'seedfinder' || s.source === 'forum') {
+                document.getElementById('search-input').value = s.real_name;
+                loadStrainDetail(s.real_name, s.source, s.strain_slug, s.breeder_slug, s.real_name);
+              } else {
+                document.getElementById('search-input').value = (s.name || '').replace(/_/g, ' ');
+                loadStrainDetail(s.name);
+
+                // Focus graph node if it exists
+                if (state.nodes) {
+                  const nodeId = s.name;
+                  const existing = state.nodes.get(nodeId);
+                  if (existing && state.network) {
+                    state.network.selectNodes([nodeId]);
+                    state.network.focus(nodeId, { scale: 1.5, animation: true });
+                  }
+                }
+              }
+            });
+
+            resultsEl.appendChild(item);
+          });
+        }
+        resultsEl.classList.add('active');
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          // Silently fail on search errors
+        }
+      });
   }
+
+  // Close search dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    const resultsEl = document.getElementById('search-results');
+    const searchInput = document.getElementById('search-input');
+    if (resultsEl && !resultsEl.contains(e.target) && e.target !== searchInput) {
+      resultsEl.classList.remove('active');
+    }
+  });
+
 
   // ── View Switching ──
   function switchView(view) {
@@ -491,6 +796,206 @@
     el.textContent = msg;
     el.classList.add('show');
     setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  // ── Lineage Tree & Formatting Helpers ──
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function buildLineageData(name, detailLineage, depth = 0) {
+    if (depth >= 3 || !name) return null;
+    
+    const nodeName = name.replace(/_/g, ' ');
+    const treeNode = {
+      name: nodeName,
+      originalName: name,
+      parents: []
+    };
+    
+    if (depth === 0 && detailLineage) {
+      let parentNames = [];
+      if (Array.isArray(detailLineage)) {
+        parentNames = detailLineage.map(p => typeof p === 'object' ? p.name : p);
+      } else if (typeof detailLineage === 'object' && Object.keys(detailLineage).length > 0) {
+        parentNames = Object.keys(detailLineage);
+      } else if (typeof detailLineage === 'string' && detailLineage.toLowerCase() !== 'unknown') {
+        const crossRegex = /\s+[xX×]\s+|\s+x\s+|_x_|_X_/g;
+        if (crossRegex.test(detailLineage)) {
+          parentNames = detailLineage.split(crossRegex);
+        }
+      }
+      
+      if (parentNames.length > 0) {
+        treeNode.parents = parentNames
+          .filter(Boolean)
+          .map(pName => buildLineageData(pName.trim(), null, depth + 1))
+          .filter(Boolean);
+        return treeNode;
+      }
+    }
+    
+    const crossRegex = /\s+[xX×]\s+|\s+x\s+|_x_|_X_/g;
+    if (crossRegex.test(name)) {
+      const parts = name.split(crossRegex).map(p => p.trim());
+      treeNode.parents = parts
+        .filter(Boolean)
+        .map(pName => buildLineageData(pName, null, depth + 1))
+        .filter(Boolean);
+    }
+    
+    return treeNode;
+  }
+
+  function getColumnsFromTree(treeNode) {
+    const columns = [[], [], []];
+    
+    function traverse(node, depth) {
+      if (!node || depth >= 3) return;
+      
+      columns[depth].push(node);
+      
+      if (node.parents && node.parents.length > 0) {
+        node.parents.forEach(parent => {
+          parent.childName = node.name;
+          traverse(parent, depth + 1);
+        });
+      }
+    }
+    
+    traverse(treeNode, 0);
+    return columns;
+  }
+
+  function drawLineageConnections(container) {
+    const svg = container.querySelector('.tree-svg-overlay');
+    if (!svg) return;
+    svg.replaceChildren();
+    
+    const containerRect = container.getBoundingClientRect();
+    const nodes = container.querySelectorAll('.tree-node');
+    
+    nodes.forEach(node => {
+      const childName = node.dataset.parentId;
+      if (!childName) return;
+      
+      const childNode = container.querySelector(`[data-node-id="${childName}"]`);
+      if (!childNode) return;
+      
+      const parentRect = node.getBoundingClientRect();
+      const childRect = childNode.getBoundingClientRect();
+      
+      const startX = parentRect.right - containerRect.left;
+      const startY = parentRect.top + parentRect.height / 2 - containerRect.top;
+      
+      const endX = childRect.left - containerRect.left;
+      const endY = childRect.top + childRect.height / 2 - containerRect.top;
+      
+      if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY)) return;
+      
+      const controlX = startX + (endX - startX) / 2;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${startX} ${startY} C ${controlX} ${startY}, ${controlX} ${endY}, ${endX} ${endY}`);
+      path.setAttribute('stroke', 'rgba(0, 210, 255, 0.4)');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('fill', 'none');
+      
+      svg.appendChild(path);
+    });
+  }
+
+  function renderLineageTree(name, detailLineage) {
+    const container = document.getElementById('family-tree-card');
+    if (!container) return;
+    container.replaceChildren();
+    
+    const treeData = buildLineageData(name, detailLineage);
+    if (!treeData || !treeData.parents || treeData.parents.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-tree-state';
+      empty.textContent = 'No lineage parents found for this cultivar.';
+      container.appendChild(empty);
+      return;
+    }
+    
+    const columns = getColumnsFromTree(treeData);
+    
+    const treeWrapper = document.createElement('div');
+    treeWrapper.className = 'family-tree-container';
+    treeWrapper.style.position = 'relative';
+    
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.className = 'tree-svg-overlay';
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.pointerEvents = 'none';
+    treeWrapper.appendChild(svg);
+    
+    const viewport = document.createElement('div');
+    viewport.className = 'tree-viewport';
+    
+    for (let i = 2; i >= 0; i--) {
+      const colNodes = columns[i];
+      if (!colNodes || colNodes.length === 0) continue;
+      
+      const colDiv = document.createElement('div');
+      colDiv.className = 'tree-column';
+      
+      colNodes.forEach(node => {
+        const nodeEl = document.createElement('div');
+        nodeEl.className = 'tree-node';
+        if (i === 0) {
+          nodeEl.classList.add('active-node');
+        }
+        nodeEl.textContent = node.name;
+        nodeEl.dataset.nodeId = node.name;
+        if (node.childName) {
+          nodeEl.dataset.parentId = node.childName;
+        }
+        
+        nodeEl.addEventListener('click', () => {
+          const normalizedNodeName = node.originalName;
+          const found = state.allNodes.find(n => 
+            n.id.toLowerCase() === normalizedNodeName.toLowerCase() ||
+            n.label.toLowerCase() === normalizedNodeName.replace(/_/g, ' ').toLowerCase()
+          );
+          if (found) {
+            handleNodeClick(found.id);
+            if (state.network) {
+              state.network.selectNodes([found.id]);
+              state.network.focus(found.id, { scale: 1.4, animation: true });
+            }
+          } else {
+            loadStrainDetail(node.originalName);
+          }
+        });
+        
+        colDiv.appendChild(nodeEl);
+      });
+      
+      viewport.appendChild(colDiv);
+    }
+    
+    treeWrapper.appendChild(viewport);
+    container.appendChild(treeWrapper);
+    
+    setTimeout(() => {
+      drawLineageConnections(treeWrapper);
+    }, 150);
+    
+    const resizeObserver = new ResizeObserver(() => {
+      drawLineageConnections(treeWrapper);
+    });
+    resizeObserver.observe(treeWrapper);
   }
 
 })();

@@ -156,6 +156,36 @@ class ChemicalProfileORM(Base):
 
     sample: Mapped["GenomicSampleORM"] = relationship("GenomicSampleORM", back_populates="chemical_profile")
 
+    @property
+    def total_thc(self) -> float | None:
+        """Total THC = THC + (THCA × 0.877)."""
+        if self.thc is None and self.thca is None:
+            return None
+        return (self.thc or 0.0) + (self.thca or 0.0) * 0.877
+
+    @property
+    def total_cbd(self) -> float | None:
+        """Total CBD = CBD + (CBDA × 0.877)."""
+        if self.cbd is None and self.cbda is None:
+            return None
+        return (self.cbd or 0.0) + (self.cbda or 0.0) * 0.877
+
+    @property
+    def terpene_dict(self) -> dict[str, float]:
+        """Return non-None terpene values as a flat dict."""
+        terpenes = {}
+        for name in [
+            "myrcene", "limonene", "caryophyllene", "pinene_alpha",
+            "pinene_beta", "linalool", "humulene", "terpinolene",
+            "ocimene", "nerolidol", "bisabolol", "borneol", "camphene",
+            "carene", "caryophyllene_oxide", "fenchol", "geraniol",
+            "phellandrene", "terpineol", "terpinene_alpha", "terpinene_gamma",
+        ]:
+            val = getattr(self, name)
+            if val is not None:
+                terpenes[name] = val
+        return terpenes
+
 
 class GeneticRelationshipORM(Base):
     """Pairwise genetic distance between two samples."""
@@ -220,6 +250,22 @@ class ObservationORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     canonical_strain: Mapped["CanonicalStrainORM"] = relationship("CanonicalStrainORM", back_populates="observations")
+    images: Mapped[list["ObservationImageORM"]] = relationship("ObservationImageORM", back_populates="observation", cascade="all, delete-orphan")
+
+
+class ObservationImageORM(Base):
+    """Image associated with a forum observation."""
+    __tablename__ = "observation_images"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    observation_id: Mapped[str] = mapped_column(String, ForeignKey("observations.id"), index=True)
+    image_url: Mapped[str] = mapped_column(String)
+    local_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    cluster_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    observation: Mapped["ObservationORM"] = relationship("ObservationORM", back_populates="images")
 
 
 # --------------------------------------------------------------------------- #
