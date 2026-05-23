@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================
-# Cannabis Researcher — Build & Deploy to Synology NAS
+# Treesearch Client — Build & Deploy to Synology NAS
 #
 # Thin wrapper — all logic lives in ../deploy-kit/lib.sh
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-IMAGE_NAME="cannabis-researcher"
-DISPLAY_NAME="🌿 Cannabis Researcher"
+IMAGE_NAME="treesearch-client"
+DISPLAY_NAME="🌿 Treesearch Client"
 
 PRE_BUILD() {
   local CENTRAL_ENV="${DEPLOY_KIT_DIR}/.env.deploy"

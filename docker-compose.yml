@@ -1,14 +1,9 @@
 version: '3.8'
 
 services:
-  cannabis-researcher:
-    image: cannabis-researcher:latest
-    container_name: cannabis-researcher
+  treesearch-client:
+    image: treesearch-client:latest
+    container_name: treesearch-client
     restart: unless-stopped
     ports:
-      - "8005:8005"
-    environment:
-      - PORT=8005
-      - SCRAPER_SERVICE_URL=http://10.0.0.16:8001
-    env_file:
-      - .env
+      - "8006:8006"
