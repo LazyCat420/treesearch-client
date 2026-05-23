@@ -92,7 +92,7 @@
     }, {
       nodes: { shape: 'dot' },
       edges: { width: 1.5, smooth: { type: 'continuous' }, color: { opacity: 0.5 } },
-      layout: { improvedLayout: true, randomSeed: 42 },
+      layout: { improvedLayout: false, randomSeed: 42 },
       physics: {
         enabled: true,
         stabilization: { enabled: true, iterations: 200, updateInterval: 25 },
@@ -218,12 +218,13 @@
 
   // ── Strain Detail Panel ──
   async function loadStrainDetail(strainName, source, strainSlug, breederSlug, realName, force = false) {
+    state.currentStrainData = null;
     const panel = document.getElementById('strain-panel');
     panel.innerHTML = `<div class="empty-state"><div class="loading-spinner"></div><div>Loading...</div></div>`;
 
     try {
       let resp;
-      const isImport = (source === 'seedfinder' || source === 'forum') || force;
+      const isImport = (source === 'seedfinder' || source === 'forum' || source === 'free-text') || force;
       if (isImport) {
         const useSource = source || (breederSlug === 'forum-import' ? 'forum' : 'seedfinder');
         const useRealName = realName || strainName;
@@ -289,10 +290,19 @@
           return 90;
         }
 
+        const importPayload = {
+          strain_slug: useStrainSlug,
+          breeder_slug: useBreederSlug,
+          force: force
+        };
+        if (source === 'free-text') {
+          importPayload.query = strainName;
+        }
+
         resp = await fetch('/api/strains/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strain_slug: useStrainSlug, breeder_slug: useBreederSlug, force: force })
+          body: JSON.stringify(importPayload)
         });
 
         if (!resp.ok) {
@@ -348,6 +358,7 @@
         }
 
         // Render final strain card
+        state.currentStrainData = finalData;
         panel.innerHTML = renderStrainCard(finalData);
         if (typeof renderLineageTree === 'function') {
           renderLineageTree(finalData.name, finalData.lineage);
@@ -380,6 +391,7 @@
         resp = await fetch(`/api/strains/${encodeURIComponent(strainName)}/detail`);
         if (!resp.ok) throw new Error('Not found');
         const d = await resp.json();
+        state.currentStrainData = d;
         panel.innerHTML = renderStrainCard(d);
         if (typeof renderLineageTree === 'function') {
           renderLineageTree(d.name, d.lineage);
@@ -397,6 +409,25 @@
 
 
 
+  function cleanImageUrl(url) {
+    if (!url) return '';
+    if (url.includes('proxy.php?image=')) {
+      try {
+        const urlObj = new URL(url);
+        const originalUrl = urlObj.searchParams.get('image');
+        if (originalUrl) {
+          return decodeURIComponent(originalUrl);
+        }
+      } catch (e) {
+        const match = url.match(/[?&]image=([^&]+)/);
+        if (match) {
+          return decodeURIComponent(match[1]);
+        }
+      }
+    }
+    return url;
+  }
+
   function renderStrainCard(d) {
     let html = `<div class="strain-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap: 10px; flex-wrap: wrap;">
@@ -407,56 +438,71 @@
           </button>
         ` : ''}
       </div>
-      ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : ''}`;
+      ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : `<span class="rsp-badge community">Community Data Only</span>`}`;
 
-    // Strain-level info (breeder, type, description) — always available
-    const hasStrainInfo = d.description || d.strain_type || d.breeder || (d.lineage && Object.keys(d.lineage).length);
-    if (hasStrainInfo) {
-      html += `<div class="card-section"><h3>Strain Information</h3><div class="meta-grid">`;
-      if (d.breeder) html += `<div class="meta-item"><div class="label">Breeder</div><div class="value">${d.breeder}</div></div>`;
-      if (d.strain_type) html += `<div class="meta-item"><div class="label">Type</div><div class="value">${d.strain_type}</div></div>`;
-      if (d.avg_flowering_days) html += `<div class="meta-item"><div class="label">Flowering</div><div class="value">${d.avg_flowering_days} days</div></div>`;
-      html += `</div>`;
-      if (d.description) {
-        if (d.translated_description) {
-          html += `<div class="description-wrap" style="margin-top:8px">
-            <p class="desc-translated" style="color:var(--text-secondary);font-size:13px;line-height:1.5;font-style:italic">
-              ${escapeHtml(d.translated_description)}
-            </p>
-            <p class="desc-original" style="display:none;color:var(--text-secondary);font-size:13px;line-height:1.5">
-              ${escapeHtml(d.description)}
-            </p>
-            <button class="translate-toggle-btn" data-lang="${escapeHtml(d.detected_language || 'es')}" style="background:none;border:none;color:var(--accent-cyan);font-size:11px;font-weight:600;cursor:pointer;padding:4px 0;margin-top:4px;display:block">
-              Auto-translated to English. Show original (${(d.detected_language || 'es').toUpperCase()})
-            </button>
-          </div>`;
-        } else {
-          html += `<p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin-top:8px">${escapeHtml(d.description)}</p>`;
-        }
-      }
-      if (d.lineage) {
-        let lineageText = '';
-        if (Array.isArray(d.lineage)) {
-          lineageText = d.lineage.map(p => typeof p === 'object' ? p.name : p).join(' × ');
-        } else if (typeof d.lineage === 'object' && Object.keys(d.lineage).length > 0) {
-          lineageText = Object.entries(d.lineage).map(([k, v]) => k + (v ? ': ' + v : '')).join(' × ');
-        } else if (typeof d.lineage === 'string' && d.lineage.toLowerCase() !== 'unknown') {
-          lineageText = d.lineage;
-        }
-        if (lineageText) {
-          html += `<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">Lineage:</span> <span style="color:var(--text-secondary);font-size:12px">${lineageText}</span></div>`;
-        }
-      }
-      
-      // Cultivar Family Tree visual placeholder
-      html += `<div class="card-section">
-        <h3>Cultivar Family Tree</h3>
-        <div class="family-tree-card" id="family-tree-card">
-          <div class="empty-tree-state">Building family tree...</div>
+    if (!d.rsp) {
+      html += `<div class="community-notice-box">
+        <div class="community-notice-title">
+          <span>⚠️</span> Community Data Only
+        </div>
+        <div>
+          This strain is not registered in the Kannapedia genomic database. DNA sequencing, cannabinoid, and terpene profiles are unavailable. Displaying forum observations and SeedFinder lineage details instead.
         </div>
       </div>`;
-      html += `</div>`;
     }
+
+    // Strain-level info (breeder, type, description) — always available
+    html += `<div class="card-section">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="margin:0">Strain Information</h3>
+        <button class="edit-strain-btn" data-strain-name="${escapeHtml(d.name)}" style="background:rgba(0, 242, 254, 0.1); border:1px solid var(--accent-cyan); color:var(--accent-cyan); padding:2px 6px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:600; transition:all 0.2s;">
+          ✏️ Edit Info
+        </button>
+      </div>
+      <div class="meta-grid">`;
+    if (d.breeder) html += `<div class="meta-item"><div class="label">Breeder</div><div class="value">${d.breeder}</div></div>`;
+    if (d.strain_type) html += `<div class="meta-item"><div class="label">Type</div><div class="value">${d.strain_type}</div></div>`;
+    if (d.avg_flowering_days) html += `<div class="meta-item"><div class="label">Flowering</div><div class="value">${d.avg_flowering_days} days</div></div>`;
+    html += `</div>`;
+    if (d.description) {
+      if (d.translated_description) {
+        html += `<div class="description-wrap" style="margin-top:8px">
+          <p class="desc-translated" style="color:var(--text-secondary);font-size:13px;line-height:1.5;font-style:italic">
+            ${escapeHtml(d.translated_description)}
+          </p>
+          <p class="desc-original" style="display:none;color:var(--text-secondary);font-size:13px;line-height:1.5">
+            ${escapeHtml(d.description)}
+          </p>
+          <button class="translate-toggle-btn" data-lang="${escapeHtml(d.detected_language || 'es')}" style="background:none;border:none;color:var(--accent-cyan);font-size:11px;font-weight:600;cursor:pointer;padding:4px 0;margin-top:4px;display:block">
+            Auto-translated to English. Show original (${(d.detected_language || 'es').toUpperCase()})
+          </button>
+        </div>`;
+      } else {
+        html += `<p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin-top:8px">${escapeHtml(d.description)}</p>`;
+      }
+    }
+    if (d.lineage) {
+      let lineageText = '';
+      if (Array.isArray(d.lineage)) {
+        lineageText = d.lineage.map(p => typeof p === 'object' ? p.name : p).join(' × ');
+      } else if (typeof d.lineage === 'object' && Object.keys(d.lineage).length > 0) {
+        lineageText = Object.entries(d.lineage).map(([k, v]) => k + (v ? ': ' + v : '')).join(' × ');
+      } else if (typeof d.lineage === 'string' && d.lineage.toLowerCase() !== 'unknown') {
+        lineageText = d.lineage;
+      }
+      if (lineageText) {
+        html += `<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">Lineage:</span> <span style="color:var(--text-secondary);font-size:12px">${lineageText}</span></div>`;
+      }
+    }
+
+    // Cultivar Family Tree visual placeholder
+    html += `<div class="card-section">
+      <h3>Cultivar Family Tree</h3>
+      <div class="family-tree-card" id="family-tree-card">
+        <div class="empty-tree-state">Building family tree...</div>
+      </div>
+    </div>`;
+    html += `</div>`;
 
     // Genomic sample metadata (from Kannapedia)
     if (d.metadata && Object.values(d.metadata).some(v => v)) {
@@ -540,8 +586,9 @@
           <div class="cluster-header">${title} (${imgs.length})</div>
           <div class="image-gallery-grid">`;
         imgs.forEach(img => {
+          const cleanedUrl = cleanImageUrl(img.image_url);
           html += `<div class="gallery-image-card">
-            <img src="${img.image_url}" alt="Strain image" onerror="this.src='https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=300'" class="gallery-img" />
+            <img src="${cleanedUrl}" alt="Strain image" onerror="this.src='https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=300'" class="gallery-img" />
             <div class="img-meta">
               <span>By ${img.author || 'Anonymous'}</span>
               ${img.source_url ? `<a href="${img.source_url}" target="_blank" class="source-link-icon" title="View Source Post">🔗</a>` : ''}
@@ -637,6 +684,21 @@
       searchTimeout = setTimeout(() => performSearch(searchInput.value), 200);
     });
 
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        clearTimeout(searchTimeout);
+        const query = searchInput.value.trim();
+        if (query) {
+          const resultsEl = document.getElementById('search-results');
+          if (resultsEl) {
+            resultsEl.classList.remove('active');
+            resultsEl.replaceChildren();
+          }
+          loadStrainDetail(query, 'free-text', query, 'free-text', query);
+        }
+      }
+    });
+
     // View tabs
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => switchView(btn.dataset.view));
@@ -658,6 +720,76 @@
 
     // Click delegation for neighbor items and expand buttons
     document.getElementById('strain-panel').addEventListener('click', e => {
+      const editBtn = e.target.closest('.edit-strain-btn');
+      if (editBtn) {
+        const strainName = editBtn.dataset.strainName;
+        const d = state.currentStrainData;
+        if (!d || d.name !== strainName) return;
+
+        const infoSection = editBtn.closest('.card-section');
+        const currentBreeder = d.breeder || '';
+        const currentType = d.strain_type || '';
+        const currentFlowering = d.avg_flowering_days || '';
+        const currentDesc = d.description || '';
+        let currentLineage = '';
+        if (Array.isArray(d.lineage)) {
+          currentLineage = d.lineage.map(p => typeof p === 'object' ? p.name : p).join(', ');
+        } else if (typeof d.lineage === 'object' && Object.keys(d.lineage).length > 0) {
+          currentLineage = Object.keys(d.lineage).join(', ');
+        } else if (typeof d.lineage === 'string') {
+          currentLineage = d.lineage;
+        }
+
+        infoSection.dataset.originalHtml = infoSection.innerHTML;
+
+        infoSection.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+            <h3 style="margin:0">Edit Strain Info</h3>
+            <button class="cancel-edit-btn" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:11px;">Cancel</button>
+          </div>
+          <form id="edit-strain-form" style="display:flex; flex-direction:column; gap:10px;">
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Breeder</label>
+              <input type="text" name="breeder" value="${escapeHtml(currentBreeder)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Type</label>
+              <select name="strain_type" style="width:100%; box-sizing: border-box; padding:6px; background:#2a2a2a; border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;">
+                <option value="" ${currentType === '' ? 'selected' : ''}>Unknown</option>
+                <option value="indica" ${currentType.toLowerCase() === 'indica' ? 'selected' : ''}>Indica</option>
+                <option value="sativa" ${currentType.toLowerCase() === 'sativa' ? 'selected' : ''}>Sativa</option>
+                <option value="hybrid" ${currentType.toLowerCase() === 'hybrid' ? 'selected' : ''}>Hybrid</option>
+                <option value="mostly indica" ${currentType.toLowerCase() === 'mostly indica' ? 'selected' : ''}>Mostly Indica</option>
+                <option value="mostly sativa" ${currentType.toLowerCase() === 'mostly sativa' ? 'selected' : ''}>Mostly Sativa</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Flowering Time (days)</label>
+              <input type="number" name="avg_flowering_days" value="${currentFlowering}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Parent Lineage (comma-separated)</label>
+              <input type="text" name="lineage" value="${escapeHtml(currentLineage)}" placeholder="e.g. Blood Wreck, Querkle" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Description</label>
+              <textarea name="description" rows="4" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px; resize:vertical;">${escapeHtml(currentDesc)}</textarea>
+            </div>
+            <button type="submit" style="background:var(--accent-cyan); border:none; color:#000; padding:8px; border-radius:4px; font-weight:bold; font-size:12px; cursor:pointer; margin-top:4px;">Save Changes</button>
+          </form>
+        `;
+        return;
+      }
+
+      const cancelBtn = e.target.closest('.cancel-edit-btn');
+      if (cancelBtn) {
+        const infoSection = cancelBtn.closest('.card-section');
+        if (infoSection && infoSection.dataset.originalHtml) {
+          infoSection.innerHTML = infoSection.dataset.originalHtml;
+        }
+        return;
+      }
+
       const rescrapeBtn = e.target.closest('.rescraped-btn');
       if (rescrapeBtn) {
         const strainSlug = rescrapeBtn.dataset.strainSlug;
@@ -710,6 +842,82 @@
           descOrig.style.display = 'block';
           translateToggleBtn.textContent = 'Show English translation';
         }
+      }
+    });
+
+    // Form submission delegation
+    document.getElementById('strain-panel').addEventListener('submit', async e => {
+      const form = e.target.closest('#edit-strain-form');
+      if (!form) return;
+      e.preventDefault();
+
+      const strainName = state.currentStrainData ? state.currentStrainData.name : '';
+      if (!strainName) return;
+
+      const formData = new FormData(form);
+      const breeder = formData.get('breeder');
+      const strain_type = formData.get('strain_type');
+      const avg_flowering_days = formData.get('avg_flowering_days');
+      const description = formData.get('description');
+      const lineageStr = formData.get('lineage');
+
+      const lineage = lineageStr
+        ? lineageStr.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      const payload = {
+        breeder,
+        strain_type,
+        avg_flowering_days: avg_flowering_days ? parseFloat(avg_flowering_days) : null,
+        description,
+        lineage
+      };
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const originalBtnText = submitBtn.textContent;
+      submitBtn.textContent = 'Saving...';
+      submitBtn.disabled = true;
+
+      try {
+        const urlName = encodeURIComponent(strainName);
+        const response = await fetch(`/api/strains/${urlName}/update`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to update strain details');
+        }
+
+        const updatedData = await response.json();
+        state.currentStrainData = updatedData;
+        const panel = document.getElementById('strain-panel');
+        panel.innerHTML = renderStrainCard(updatedData);
+        if (typeof renderLineageTree === 'function') {
+          renderLineageTree(updatedData.name, updatedData.lineage);
+        }
+
+        // Trigger a reload of network data to update UI node representations
+        const ndResp = await fetch('/api/network-data');
+        if (ndResp.ok) {
+          const ndData = await ndResp.json();
+          state.allNodes = ndData.nodes || [];
+          state.allRelationships = ndData.relationships || [];
+          state.allTerpeneRels = ndData.terpeneRelationships || [];
+          renderStats();
+          if (state.currentView === 'network') {
+            buildGraph();
+            if (state.nodes && state.network) {
+              state.network.selectNodes([updatedData.name]);
+              state.network.focus(updatedData.name, { scale: 1.5, animation: true });
+            }
+          }
+        }
+      } catch (err) {
+        alert(err.message);
+        submitBtn.textContent = originalBtnText;
+        submitBtn.disabled = false;
       }
     });
   }
@@ -805,6 +1013,13 @@
               const badge = document.createElement('span');
               badge.className = 'search-result-badge forum';
               badge.textContent = 'Forums';
+              metaDiv.appendChild(badge);
+            }
+
+            if (!s.rsp && s.source !== 'seedfinder' && s.source !== 'forum') {
+              const badge = document.createElement('span');
+              badge.className = 'search-result-badge community';
+              badge.textContent = 'Community';
               metaDiv.appendChild(badge);
             }
 
