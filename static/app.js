@@ -29,6 +29,24 @@
     complete: { bg: '#3a7bd5', border: '#5c9ce6' },
     incomplete: { bg: '#333348', border: '#555568' },
     selected: { bg: '#ef5350', border: '#ff7043' },
+    
+    // Source specific colors
+    kannapedia: {
+      complete: { bg: '#3a7bd5', border: '#5c9ce6' }, // Blue
+      incomplete: { bg: '#333348', border: '#555568' } // Grey
+    },
+    seedfinder: {
+      complete: { bg: '#2e7d32', border: '#4caf50' }, // Green
+      incomplete: { bg: '#1b5e20', border: '#2e7d32' } // Dark Green
+    },
+    forum: {
+      complete: { bg: '#7b1fa2', border: '#9c27b0' }, // Purple
+      incomplete: { bg: '#4a148c', border: '#7b1fa2' } // Dark Purple
+    },
+    manual: {
+      complete: { bg: '#ef6c00', border: '#ff9800' }, // Orange
+      incomplete: { bg: '#5d4037', border: '#ef6c00' } // Brown/Orange
+    }
   };
 
   // ── Init ──
@@ -41,6 +59,9 @@
       state.allNodes = data.nodes || [];
       state.allRelationships = data.relationships || [];
       state.allTerpeneRels = data.terpeneRelationships || [];
+      console.log('Nodes loaded:', state.allNodes.length);
+      console.log('Genetic relationships loaded:', state.allRelationships.length);
+      console.log('Terpene relationships loaded:', state.allTerpeneRels.length);
       renderStats();
       buildGraph();
       bindEvents();
@@ -65,26 +86,44 @@
     const container = document.getElementById('graph-container');
 
     // Map nodes with dark-mode colors
-    const nodeData = state.allNodes.map(n => ({
-      id: n.id,
-      label: (n.label || n.id).replace(/_/g, ' '),
-      title: `${(n.label||n.id).replace(/_/g,' ')}\nRSP: ${n.rsp || '—'}\n${n.complete ? 'Complete data' : 'Incomplete'}`,
-      color: {
-        background: n.complete ? COLORS.complete.bg : COLORS.incomplete.bg,
-        border: n.complete ? COLORS.complete.border : COLORS.incomplete.border,
-        highlight: { background: COLORS.selected.bg, border: COLORS.selected.border },
-        hover: { background: n.complete ? '#4a8ce8' : '#444460', border: n.complete ? '#6eaaff' : '#666680' },
-      },
-      font: { color: '#e8e8f0', strokeWidth: 2, strokeColor: '#0a0a14', size: 13 },
-      rsp: n.rsp,
-      complete: n.complete,
-      size: n.complete ? 18 : 12,
-      borderWidth: 2,
-      shadow: { enabled: true, color: 'rgba(0,0,0,0.5)', size: 8 },
-    }));
+    const nodeData = state.allNodes.map(n => {
+      const src = n.source || 'kannapedia';
+      const isComplete = n.complete;
+      const palette = COLORS[src] || COLORS.kannapedia;
+      const nodeColors = isComplete ? palette.complete : palette.incomplete;
+      
+      const hoverBg = isComplete ? '#4a8ce8' : '#444460';
+      const hoverBorder = isComplete ? '#6eaaff' : '#666680';
+      
+      const isActive = state.activeNodes.has(n.id);
+      const bg = isActive ? COLORS.selected.bg : nodeColors.bg;
+      const border = isActive ? COLORS.selected.border : nodeColors.border;
+
+      return {
+        id: n.id,
+        label: (n.label || n.id).replace(/_/g, ' '),
+        title: `${(n.label||n.id).replace(/_/g,' ')}\nRSP: ${n.rsp || '—'}\nSource: ${capitalize(src)}\n${isComplete ? 'Complete data' : 'Incomplete'}`,
+        color: {
+          background: bg,
+          border: border,
+          highlight: { background: COLORS.selected.bg, border: COLORS.selected.border },
+          hover: { background: hoverBg, border: hoverBorder },
+        },
+        font: { color: '#e8e8f0', strokeWidth: 2, strokeColor: '#0a0a14', size: 13 },
+        rsp: n.rsp,
+        complete: isComplete,
+        source: src,
+        size: isComplete ? 18 : 12,
+        borderWidth: 2,
+        shadow: { enabled: true, color: 'rgba(0,0,0,0.5)', size: 8 },
+      };
+    });
 
     state.nodes = new vis.DataSet(nodeData);
     state.edges = new vis.DataSet([]);
+
+    // Populate all edges initially before creating the network to allow clustering
+    refreshAllEdges();
 
     state.network = new vis.Network(container, {
       nodes: state.nodes,
@@ -107,10 +146,13 @@
       state.physicsOn = false;
     });
 
-    // Node click
+    // Click on node or background
     state.network.on('click', params => {
       if (params.nodes.length > 0) {
         handleNodeClick(params.nodes[0]);
+      } else {
+        state.activeNodes.clear();
+        resetHighlighting();
       }
     });
   }
@@ -122,98 +164,212 @@
 
     // Toggle active
     if (state.activeNodes.has(nodeId)) {
-      state.activeNodes.delete(nodeId);
-      removeEdgesFor(nodeId);
-      resetNodeColor(nodeId, node);
+      state.activeNodes.clear();
+      resetHighlighting();
     } else {
-      state.activeNodes.add(nodeId);
-      addEdgesFor(nodeId);
-      state.nodes.update({
-        id: nodeId,
-        color: { background: COLORS.selected.bg, border: COLORS.selected.border },
-      });
+      activateNode(nodeId);
     }
 
     // Load detail
     loadStrainDetail(nodeId);
   }
 
-  function resetNodeColor(nodeId, node) {
-    state.nodes.update({
-      id: nodeId,
-      color: {
-        background: node.complete ? COLORS.complete.bg : COLORS.incomplete.bg,
-        border: node.complete ? COLORS.complete.border : COLORS.incomplete.border,
-      },
-    });
+  function activateNode(nodeId) {
+    if (!nodeId) return;
+    const node = state.nodes ? state.nodes.get(nodeId) : null;
+    if (!node) return;
+
+    state.activeNodes.clear();
+    state.activeNodes.add(nodeId);
+    highlightNeighborhood(nodeId);
   }
 
-  // ── Edge Management ──
-  function getRelationships(nodeId) {
-    if (state.relType === 'genetic') {
-      return findConnections(nodeId, state.allRelationships);
-    } else if (state.relType === 'terpene') {
-      return findConnections(nodeId, state.allTerpeneRels);
-    } else {
-      // Combined: merge both
-      const g = findConnections(nodeId, state.allRelationships);
-      const t = findConnections(nodeId, state.allTerpeneRels);
-      const seen = new Set(g.map(r => `${r.from}-${r.to}`));
-      t.forEach(r => { if (!seen.has(`${r.from}-${r.to}`)) g.push(r); });
-      return g;
+  // ── Edge Management & Neighborhood Highlighting ──
+  function relForEdgeId(eid) {
+    const parts = eid.split('|');
+    const from = parts[0];
+    const to = parts[1];
+    const type = parts[2];
+    const pool = type === 'genetic' ? state.allRelationships : state.allTerpeneRels;
+    return pool.find(r => (r.from === from && r.to === to) || (r.from === to && r.to === from));
+  }
+
+  function highlightNeighborhood(nodeId) {
+    if (!nodeId) {
+      resetHighlighting();
+      return;
     }
-  }
 
-  function findConnections(nodeId, pool) {
-    let threshold = 0.2;
-    let conns = [];
-    while (threshold <= 1.0) {
-      conns = pool.filter(r =>
-        (r.from === nodeId || r.to === nodeId) && r.distance <= threshold
-      ).sort((a, b) => a.distance - b.distance);
-      if (conns.length > 0) break;
-      threshold += 0.1;
-    }
-    return conns;
-  }
+    const connectedNodes = new Set();
+    connectedNodes.add(nodeId);
 
-  function addEdgesFor(nodeId) {
-    const rels = getRelationships(nodeId);
-    const edgeColor = COLORS[state.relType].edge;
+    const connectedEdges = new Set();
 
-    rels.forEach(rel => {
-      const eid = [rel.from, rel.to].sort().join('|');
-      if (!state.currentEdges.has(eid)) {
-        state.edges.add({
-          id: eid,
-          from: rel.from,
-          to: rel.to,
-          value: 1 - rel.distance,
-          length: rel.distance * 400,
-          title: `${capitalize(state.relType)} Distance: ${rel.distance.toFixed(3)}`,
-          color: { color: edgeColor, opacity: Math.max(0.25, 1 - rel.distance) },
-          width: Math.max(1, 3 * (1 - rel.distance)),
-        });
-        state.currentEdges.add(eid);
-      }
-    });
-  }
-
-  function removeEdgesFor(nodeId) {
-    const toRemove = [];
+    // Find all edges connected to nodeId
     state.edges.forEach(edge => {
       if (edge.from === nodeId || edge.to === nodeId) {
-        toRemove.push(edge.id);
-        state.currentEdges.delete(edge.id);
+        connectedEdges.add(edge.id);
+        connectedNodes.add(edge.from);
+        connectedNodes.add(edge.to);
       }
     });
-    state.edges.remove(toRemove);
+
+    // Update nodes opacity and size
+    const nodeUpdates = [];
+    state.nodes.forEach(node => {
+      const isConnected = connectedNodes.has(node.id);
+      const isTarget = node.id === nodeId;
+      
+      const src = node.source || 'kannapedia';
+      const isComplete = node.complete;
+      const palette = COLORS[src] || COLORS.kannapedia;
+      const nodeColors = isComplete ? palette.complete : palette.incomplete;
+      
+      const bg = isTarget ? COLORS.selected.bg : nodeColors.bg;
+      const border = isTarget ? COLORS.selected.border : nodeColors.border;
+
+      nodeUpdates.push({
+        id: node.id,
+        color: {
+          background: bg,
+          border: border,
+          highlight: { background: COLORS.selected.bg, border: COLORS.selected.border },
+        },
+        opacity: isConnected ? 1.0 : 0.15,
+        size: isTarget ? 22 : (isConnected ? (isComplete ? 18 : 12) : (isComplete ? 12 : 8)),
+        font: {
+          color: isConnected ? '#e8e8f0' : 'rgba(232, 232, 240, 0.25)',
+        }
+      });
+    });
+    state.nodes.update(nodeUpdates);
+
+    // Update edges opacity and width
+    const edgeUpdates = [];
+    state.edges.forEach(edge => {
+      const isConnected = connectedEdges.has(edge.id);
+      const parts = edge.id.split('|');
+      const type = parts[parts.length - 1];
+      const rel = relForEdgeId(edge.id);
+      const distance = rel ? rel.distance : 0.5;
+      
+      edgeUpdates.push({
+        id: edge.id,
+        color: {
+          color: COLORS[type].edge,
+          opacity: isConnected ? Math.max(0.5, 1 - distance) : 0.02
+        },
+        width: isConnected ? Math.max(1.5, 4 * (1 - distance)) : 0.5
+      });
+    });
+    state.edges.update(edgeUpdates);
+  }
+
+  function resetHighlighting() {
+    if (!state.nodes) return;
+    const nodeUpdates = [];
+    state.nodes.forEach(node => {
+      const src = node.source || 'kannapedia';
+      const isComplete = node.complete;
+      const palette = COLORS[src] || COLORS.kannapedia;
+      const nodeColors = isComplete ? palette.complete : palette.incomplete;
+
+      nodeUpdates.push({
+        id: node.id,
+        color: {
+          background: nodeColors.bg,
+          border: nodeColors.border,
+          highlight: { background: COLORS.selected.bg, border: COLORS.selected.border },
+        },
+        opacity: 1.0,
+        size: isComplete ? 18 : 12,
+        font: {
+          color: '#e8e8f0',
+        }
+      });
+    });
+    state.nodes.update(nodeUpdates);
+
+    if (!state.edges) return;
+    const edgeUpdates = [];
+    state.edges.forEach(edge => {
+      const parts = edge.id.split('|');
+      const type = parts[parts.length - 1];
+      const rel = relForEdgeId(edge.id);
+      const distance = rel ? rel.distance : 0.5;
+      
+      edgeUpdates.push({
+        id: edge.id,
+        color: {
+          color: COLORS[type].edge,
+          opacity: Math.max(0.1, (1 - distance) * 0.4)
+        },
+        width: Math.max(0.5, 2 * (1 - distance))
+      });
+    });
+    state.edges.update(edgeUpdates);
   }
 
   function refreshAllEdges() {
     state.edges.clear();
     state.currentEdges.clear();
-    state.activeNodes.forEach(nid => addEdgesFor(nid));
+    
+    // Determine pool of relationships to use
+    let rels = [];
+    if (state.relType === 'genetic') {
+      rels = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+    } else if (state.relType === 'terpene') {
+      rels = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+    } else { // combined
+      const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+      const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+      rels = [...gen, ...terp];
+    }
+
+    // Add edges to DataSet
+    rels.forEach(rel => {
+      const type = rel.type;
+      const edgeColor = COLORS[type].edge;
+      const titlePrefix = type === 'genetic' ? 'Genetic' : 'Terpene';
+      const eid = [rel.from, rel.to].sort().join('|') + `|${type}`;
+      
+      // Filter out extremely weak connections to keep the graph clean
+      const maxDist = type === 'genetic' ? 0.35 : 0.5;
+      if (rel.distance <= maxDist) {
+        if (state.currentEdges.has(eid)) {
+          const existing = state.edges.get(eid);
+          if (existing && (1 - rel.distance) > existing.value) {
+            state.edges.update({
+              id: eid,
+              value: 1 - rel.distance,
+              length: rel.distance * 350,
+              title: `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`,
+              color: { color: edgeColor, opacity: Math.max(0.1, (1 - rel.distance) * 0.4) },
+              width: Math.max(0.5, 2 * (1 - rel.distance)),
+            });
+          }
+          return;
+        }
+
+        state.edges.add({
+          id: eid,
+          from: rel.from,
+          to: rel.to,
+          value: 1 - rel.distance,
+          length: rel.distance * 350,
+          title: `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`,
+          color: { color: edgeColor, opacity: Math.max(0.1, (1 - rel.distance) * 0.4) },
+          width: Math.max(0.5, 2 * (1 - rel.distance)),
+        });
+        state.currentEdges.add(eid);
+      }
+    });
+
+    // If there is an active node, apply the highlight immediately
+    if (state.activeNodes.size > 0) {
+      const activeNodeId = Array.from(state.activeNodes)[0];
+      highlightNeighborhood(activeNodeId);
+    }
   }
 
   // ── Strain Detail Panel ──
@@ -372,14 +528,18 @@
             state.allNodes = ndData.nodes || [];
             state.allRelationships = ndData.relationships || [];
             state.allTerpeneRels = ndData.terpeneRelationships || [];
+            console.log('Nodes loaded after import:', state.allNodes.length);
+            console.log('Genetic relationships loaded after import:', state.allRelationships.length);
+            console.log('Terpene relationships loaded after import:', state.allTerpeneRels.length);
             renderStats();
             if (state.currentView === 'network') {
               buildGraph();
-              // Try to select the node
+               // Try to select and activate the node
               const targetNodeId = finalData.name;
-              if (state.nodes && state.network) {
+              if (state.nodes && state.nodes.get(targetNodeId) && state.network) {
                 state.network.selectNodes([targetNodeId]);
                 state.network.focus(targetNodeId, { scale: 1.5, animation: true });
+                activateNode(targetNodeId);
               }
             }
           }
@@ -395,6 +555,12 @@
         panel.innerHTML = renderStrainCard(d);
         if (typeof renderLineageTree === 'function') {
           renderLineageTree(d.name, d.lineage);
+        }
+
+        // Focus and activate in graph if view is network
+        if (state.currentView === 'network' && state.nodes && state.nodes.get(d.name) && state.network) {
+          state.network.selectNodes([d.name]);
+          activateNode(d.name);
         }
       }
     } catch (err) {
@@ -430,6 +596,19 @@
   }
 
   function renderStrainCard(d) {
+    let badgeText = '🧬 Kannapedia WGS Data';
+    let badgeClass = 'kannapedia';
+    if (d.source === 'seedfinder') {
+      badgeText = '🌱 SeedFinder Lineage';
+      badgeClass = 'seedfinder';
+    } else if (d.source === 'forum') {
+      badgeText = '💬 Forum Observation';
+      badgeClass = 'forum';
+    } else if (d.source === 'manual') {
+      badgeText = '✍️ Manual Entry';
+      badgeClass = 'manual';
+    }
+
     let html = `<div class="strain-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap: 10px; flex-wrap: wrap;">
         <h2 style="margin:0">${(d.name || '').replace(/_/g, ' ')}</h2>
@@ -439,7 +618,10 @@
           </button>
         ` : ''}
       </div>
-      ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : `<span class="rsp-badge community">Community Data Only</span>`}`;
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
+        ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : `<span class="rsp-badge community">Community Data Only</span>`}
+        <span class="rsp-badge ${badgeClass}">${badgeText}</span>
+      </div>`;
 
     if (!d.rsp) {
       html += `<div class="community-notice-box">
@@ -656,10 +838,23 @@
     }
 
     // Genetic neighbors
-    const neighbors = state.relType === 'terpene' ? d.terpene_neighbors : d.genetic_neighbors;
+    const neighbors = d.genetic_neighbors;
     if (neighbors && neighbors.length) {
-      html += `<div class="card-section"><h3>${capitalize(state.relType)} Neighbors</h3><ul class="neighbor-list">`;
+      html += `<div class="card-section"><h3>Genetic Neighbors</h3><ul class="neighbor-list">`;
       neighbors.slice(0, 15).forEach(n => {
+        html += `<li class="neighbor-item" data-strain="${n.strain}">
+          <span>${(n.strain || '').replace(/_/g, ' ')}</span>
+          <span class="dist">${n.distance.toFixed(3)}</span>
+        </li>`;
+      });
+      html += `</ul></div>`;
+    }
+
+    // Terpene neighbors
+    const tNeighbors = d.terpene_neighbors;
+    if (tNeighbors && tNeighbors.length) {
+      html += `<div class="card-section"><h3>Terpene Neighbors</h3><ul class="neighbor-list">`;
+      tNeighbors.slice(0, 15).forEach(n => {
         html += `<li class="neighbor-item" data-strain="${n.strain}">
           <span>${(n.strain || '').replace(/_/g, ' ')}</span>
           <span class="dist">${n.distance.toFixed(3)}</span>
@@ -727,10 +922,12 @@
       btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
 
-    // Relation toggle
+    // Relation toggles
     document.querySelectorAll('.rel-btn').forEach(btn => {
-      btn.addEventListener('click', () => switchRelation(btn.dataset.rel));
+      btn.addEventListener('click', () => switchRelType(btn.dataset.rel));
     });
+
+
 
     // Graph controls
     document.getElementById('btn-zoom-in').addEventListener('click', () =>
@@ -762,6 +959,19 @@
         } else if (typeof d.lineage === 'string') {
           currentLineage = d.lineage;
         }
+
+        const currentTHC = d.cannabinoids && d.cannabinoids.THC !== undefined ? d.cannabinoids.THC : '';
+        const currentCBD = d.cannabinoids && d.cannabinoids.CBD !== undefined ? d.cannabinoids.CBD : '';
+        
+        const currentMyrcene = d.terpenes && d.terpenes.myrcene !== undefined ? d.terpenes.myrcene : '';
+        const currentLimonene = d.terpenes && d.terpenes.limonene !== undefined ? d.terpenes.limonene : '';
+        const currentCaryophyllene = d.terpenes && d.terpenes.caryophyllene !== undefined ? d.terpenes.caryophyllene : '';
+        const currentPineneAlpha = d.terpenes && d.terpenes.pinene_alpha !== undefined ? d.terpenes.pinene_alpha : '';
+        const currentPineneBeta = d.terpenes && d.terpenes.pinene_beta !== undefined ? d.terpenes.pinene_beta : '';
+        const currentLinalool = d.terpenes && d.terpenes.linalool !== undefined ? d.terpenes.linalool : '';
+        const currentHumulene = d.terpenes && d.terpenes.humulene !== undefined ? d.terpenes.humulene : '';
+        const currentTerpinolene = d.terpenes && d.terpenes.terpinolene !== undefined ? d.terpenes.terpinolene : '';
+        const currentOcimene = d.terpenes && d.terpenes.ocimene !== undefined ? d.terpenes.ocimene : '';
 
         infoSection.dataset.originalHtml = infoSection.innerHTML;
 
@@ -798,6 +1008,63 @@
               <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Description</label>
               <textarea name="description" rows="4" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px; resize:vertical;">${escapeHtml(currentDesc)}</textarea>
             </div>
+            
+            <div style="margin-top: 8px;">
+              <h4 style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom: 6px; text-transform:uppercase;">Cannabinoids</h4>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">THC %</label>
+                  <input type="number" step="0.01" name="thc" value="${currentTHC}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">CBD %</label>
+                  <input type="number" step="0.01" name="cbd" value="${currentCBD}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+              </div>
+            </div>
+            
+            <div style="margin-top: 8px;">
+              <h4 style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom: 6px; text-transform:uppercase;">Terpenes (%)</h4>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Myrcene</label>
+                  <input type="number" step="0.001" name="myrcene" value="${currentMyrcene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Limonene</label>
+                  <input type="number" step="0.001" name="limonene" value="${currentLimonene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Caryophyllene</label>
+                  <input type="number" step="0.001" name="caryophyllene" value="${currentCaryophyllene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Pinene Alpha</label>
+                  <input type="number" step="0.001" name="pinene_alpha" value="${currentPineneAlpha}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Pinene Beta</label>
+                  <input type="number" step="0.001" name="pinene_beta" value="${currentPineneBeta}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Linalool</label>
+                  <input type="number" step="0.001" name="linalool" value="${currentLinalool}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Humulene</label>
+                  <input type="number" step="0.001" name="humulene" value="${currentHumulene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Terpinolene</label>
+                  <input type="number" step="0.001" name="terpinolene" value="${currentTerpinolene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+                <div>
+                  <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Ocimene</label>
+                  <input type="number" step="0.001" name="ocimene" value="${currentOcimene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                </div>
+              </div>
+            </div>
+            
             <button type="submit" style="background:var(--accent-cyan); border:none; color:#000; padding:8px; border-radius:4px; font-weight:bold; font-size:12px; cursor:pointer; margin-top:4px;">Save Changes</button>
           </form>
         `;
@@ -909,12 +1176,31 @@
         ? lineageStr.split(',').map(s => s.trim()).filter(Boolean)
         : [];
 
+      const cannabinoids = {
+        thc: formData.get('thc') ? parseFloat(formData.get('thc')) : null,
+        cbd: formData.get('cbd') ? parseFloat(formData.get('cbd')) : null,
+      };
+
+      const terpenes = {
+        myrcene: formData.get('myrcene') ? parseFloat(formData.get('myrcene')) : null,
+        limonene: formData.get('limonene') ? parseFloat(formData.get('limonene')) : null,
+        caryophyllene: formData.get('caryophyllene') ? parseFloat(formData.get('caryophyllene')) : null,
+        pinene_alpha: formData.get('pinene_alpha') ? parseFloat(formData.get('pinene_alpha')) : null,
+        pinene_beta: formData.get('pinene_beta') ? parseFloat(formData.get('pinene_beta')) : null,
+        linalool: formData.get('linalool') ? parseFloat(formData.get('linalool')) : null,
+        humulene: formData.get('humulene') ? parseFloat(formData.get('humulene')) : null,
+        terpinolene: formData.get('terpinolene') ? parseFloat(formData.get('terpinolene')) : null,
+        ocimene: formData.get('ocimene') ? parseFloat(formData.get('ocimene')) : null,
+      };
+
       const payload = {
         breeder,
         strain_type,
         avg_flowering_days: avg_flowering_days ? parseFloat(avg_flowering_days) : null,
         description,
-        lineage
+        lineage,
+        cannabinoids,
+        terpenes
       };
 
       const submitBtn = form.querySelector('button[type="submit"]');
@@ -949,10 +1235,13 @@
           state.allNodes = ndData.nodes || [];
           state.allRelationships = ndData.relationships || [];
           state.allTerpeneRels = ndData.terpeneRelationships || [];
+          console.log('Nodes loaded after update:', state.allNodes.length);
+          console.log('Genetic relationships loaded after update:', state.allRelationships.length);
+          console.log('Terpene relationships loaded after update:', state.allTerpeneRels.length);
           renderStats();
           if (state.currentView === 'network') {
             buildGraph();
-            if (state.nodes && state.network) {
+            if (state.nodes && state.nodes.get(updatedData.name) && state.network) {
               state.network.selectNodes([updatedData.name]);
               state.network.focus(updatedData.name, { scale: 1.5, animation: true });
             }
@@ -1080,13 +1369,14 @@
                 document.getElementById('search-input').value = (s.name || '').replace(/_/g, ' ');
                 loadStrainDetail(s.name);
 
-                // Focus graph node if it exists
+                // Focus and activate graph node if it exists
                 if (state.nodes) {
                   const nodeId = s.name;
                   const existing = state.nodes.get(nodeId);
                   if (existing && state.network) {
                     state.network.selectNodes([nodeId]);
                     state.network.focus(nodeId, { scale: 1.5, animation: true });
+                    activateNode(nodeId);
                   }
                 }
               }
@@ -1130,8 +1420,47 @@
     } else if (view === 'full-tree') {
       container.innerHTML = '';
       if (typeof renderFullPhylogeneticTree === 'function') {
-        renderFullPhylogeneticTree(container, state.nodes, state.allRelationships);
+        let pool = [];
+        if (state.relType === 'genetic') {
+          pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+        } else if (state.relType === 'terpene') {
+          pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+        } else {
+          const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+          const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+          pool = [...gen, ...terp];
+        }
+        renderFullPhylogeneticTree(container, state.nodes, pool, state.relType);
       }
+    }
+  }
+
+  function switchRelType(type) {
+    state.relType = type;
+    document.querySelectorAll('.rel-btn').forEach(btn => {
+      btn.classList.remove('active-genetic', 'active-terpene', 'active-combined');
+      if (btn.dataset.rel === type) {
+        btn.classList.add(`active-${type}`);
+      }
+    });
+
+    // Clear and rebuild edges for the new relation type
+    refreshAllEdges();
+    
+    // Re-enable physics to allow the graph to re-stabilize and cluster according to the new relationships!
+    if (state.network) {
+      state.network.setOptions({
+        physics: {
+          enabled: true,
+          stabilization: { enabled: true, iterations: 150, updateInterval: 25 }
+        }
+      });
+      state.physicsOn = true;
+      // After stabilization, turn off physics again
+      state.network.once('stabilizationIterationsDone', () => {
+        state.network.setOptions({ physics: { enabled: false } });
+        state.physicsOn = false;
+      });
     }
   }
 
@@ -1159,7 +1488,19 @@
         size: 20, font: { color: '#e8e8f0', strokeWidth: 2, strokeColor: '#0a0a14', size: 13 },
       });
 
-      const rels = state.allRelationships
+      // Determine active pool of relationships
+      let pool = [];
+      if (state.relType === 'genetic') {
+        pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+      } else if (state.relType === 'terpene') {
+        pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+      } else { // combined
+        const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+        const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+        pool = [...gen, ...terp];
+      }
+
+      const rels = pool
         .filter(r => (r.from === nodeId || r.to === nodeId) && r.distance < 0.5 && state.nodes.get(r.from === nodeId ? r.to : r.from))
         .sort((a, b) => a.distance - b.distance).slice(0, 4);
 
@@ -1169,10 +1510,15 @@
           const ek = [nodeId, childId].sort().join('_');
           if (!processedEdges.has(ek)) {
             processedEdges.add(ek);
+            
+            const type = rel.type || (state.allTerpeneRels.some(r => r.from === rel.from && r.to === rel.to) ? 'terpene' : 'genetic');
+            const edgeColor = COLORS[type].edge;
+            const titlePrefix = type === 'genetic' ? 'Genetic' : 'Terpene';
+
             treeEdges.add({
               id: `e_${ek}_${level}`, from: `${nodeId}_${level}`, to: `${childId}_${level + 1}`,
-              width: 2, color: { color: COLORS.genetic.edge, opacity: 0.6 },
-              title: `Distance: ${rel.distance.toFixed(3)}`,
+              width: 2, color: { color: edgeColor, opacity: 0.6 },
+              title: `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`,
             });
             addNode(childId, level + 1);
           }
@@ -1189,21 +1535,7 @@
     });
   }
 
-  // ── Relation Switching ──
-  function switchRelation(rel) {
-    state.relType = rel;
-    document.querySelectorAll('.rel-btn').forEach(b => {
-      b.className = 'rel-btn';
-    });
-    document.querySelector(`.rel-btn[data-rel="${rel}"]`).classList.add(`active-${rel}`);
-    refreshAllEdges();
 
-    // Re-render detail panel if a strain is selected
-    if (state.activeNodes.size > 0) {
-      const last = Array.from(state.activeNodes).pop();
-      loadStrainDetail(last);
-    }
-  }
 
   // ── Physics Toggle ──
   function togglePhysics() {
@@ -1400,7 +1732,7 @@
           );
           if (found) {
             handleNodeClick(found.id);
-            if (state.network) {
+            if (state.nodes && state.nodes.get(found.id) && state.network) {
               state.network.selectNodes([found.id]);
               state.network.focus(found.id, { scale: 1.4, animation: true });
             }

@@ -1,4 +1,4 @@
-function renderFullPhylogeneticTree(container, nodes, allRelationships) {
+function renderFullPhylogeneticTree(container, nodes, allRelationships, relType = 'genetic') {
     console.log('Rendering full phylogenetic tree');
     container.innerHTML = '';
     
@@ -45,10 +45,11 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships) {
         });
         
         // Find relationships
+        const maxDist = relType === 'genetic' ? 0.2 : 0.5;
         const relationships = allRelationships
             .filter(rel => {
                 const isConnected = (rel.from === nodeId || rel.to === nodeId);
-                const withinDistance = rel.distance < 0.2;
+                const withinDistance = rel.distance < maxDist;
                 const otherNode = rel.from === nodeId ? rel.to : rel.from;
                 const hasValidNode = nodes.get(otherNode);
                 return isConnected && withinDistance && hasValidNode;
@@ -63,16 +64,20 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships) {
                 if (!processedEdges.has(edgeKey)) {
                     processedEdges.add(edgeKey);
                     
+                    const type = rel.type || (relType === 'combined' ? (rel.distance_type || 'genetic') : relType);
+                    const edgeColor = type === 'terpene' ? '#00c853' : '#00d2ff';
+                    const titlePrefix = type === 'terpene' ? 'Terpene' : 'Genetic';
+
                     treeEdges.add({
                         id: `edge_${edgeKey}`,
                         from: nodeId,
                         to: childId,
                         width: Math.max(1, 2 - (level * 0.3)),
                         color: { 
-                            color: '#00d2ff', 
+                            color: edgeColor, 
                             opacity: Math.max(0.3, 0.8 - (level * 0.1)) 
                         },
-                        title: `Genetic Distance: ${rel.distance.toFixed(3)}`
+                        title: `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`
                     });
                     
                     addNodeToTree(childId, level + 1);
@@ -125,6 +130,8 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships) {
     });
     
     // Add scale bar
+    const scaleBarColor = relType === 'terpene' ? '#00c853' : '#00d2ff';
+    const scaleBarLabel = relType === 'terpene' ? 'Terpene' : 'Genetic';
     const scaleBar = document.createElement('div');
     scaleBar.style.cssText = `
         position: absolute;
@@ -139,13 +146,13 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships) {
         color: #8888a0;
     `;
     scaleBar.innerHTML = `
-        <div>Genetic Distance Scale:</div>
+        <div>${scaleBarLabel} Distance Scale:</div>
         <div style="display: flex; align-items: center; margin-top: 5px;">
-            <div style="border-top: 2px solid #00d2ff; width: 50px;"></div>
+            <div style="border-top: 2px solid ${scaleBarColor}; width: 50px;"></div>
             <div style="margin-left: 5px; color: #e8e8f0;">0.05</div>
         </div>
         <div style="display: flex; align-items: center; margin-top: 5px;">
-            <div style="border-top: 2px solid #00d2ff; width: 100px;"></div>
+            <div style="border-top: 2px solid ${scaleBarColor}; width: 100px;"></div>
             <div style="margin-left: 5px; color: #e8e8f0;">0.10</div>
         </div>
     `;
