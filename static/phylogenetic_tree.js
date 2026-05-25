@@ -68,8 +68,8 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships, relType 
                     processedEdges.add(edgeKey);
                     
                     const type = rel.type || (relType === 'combined' ? (rel.distance_type || 'genetic') : relType);
-                    const edgeColor = type === 'terpene' ? '#00c853' : '#00d2ff';
-                    const titlePrefix = type === 'terpene' ? 'Terpene' : 'Genetic';
+                    const edgeColor = type === 'terpene' ? '#00c853' : (type === 'lineage' ? '#ffb300' : '#00d2ff');
+                    const titlePrefix = type === 'terpene' ? 'Terpene' : (type === 'lineage' ? 'Lineage' : 'Genetic');
                     
                     edgesToAdd.push({
                         id: `edge_${edgeKey}`,
@@ -140,8 +140,8 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships, relType 
     });
     
     // Add scale bar
-    const scaleBarColor = relType === 'terpene' ? '#00c853' : '#00d2ff';
-    const scaleBarLabel = relType === 'terpene' ? 'Terpene' : 'Genetic';
+    const scaleBarColor = relType === 'terpene' ? '#00c853' : (relType === 'lineage' ? '#ffb300' : '#00d2ff');
+    const scaleBarLabel = relType === 'terpene' ? 'Terpene' : (relType === 'lineage' ? 'Lineage' : 'Genetic');
     const scaleBar = document.createElement('div');
     scaleBar.style.cssText = `
         position: absolute;

@@ -284,6 +284,12 @@ body {
   color: var(--accent-green);
 }
 
+.rel-btn.active-lineage {
+  background: rgba(255, 179, 0, 0.12);
+  border-color: #ffb300;
+  color: #ffb300;
+}
+
 .rel-btn.active-combined {
   background: rgba(156, 39, 176, 0.12);
   border-color: var(--accent-purple);

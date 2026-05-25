@@ -14,9 +14,10 @@
     allNodes: [],
     allRelationships: [],
     allTerpeneRels: [],
+    allLineageRels: [],
     activeNodes: new Set(),
     currentEdges: new Set(),
-    relType: 'genetic',   // 'genetic' | 'terpene' | 'combined'
+    relType: 'genetic',   // 'genetic' | 'terpene' | 'lineage' | 'combined'
     currentView: 'network',
     physicsOn: false,
   };
@@ -26,6 +27,7 @@
     genetic:  { edge: '#00d2ff', bg: 'rgba(0,210,255,0.12)', node: '#3a7bd5' },
     terpene:  { edge: '#00c853', bg: 'rgba(0,200,83,0.12)',  node: '#7cb342' },
     combined: { edge: '#e040fb', bg: 'rgba(224,64,251,0.12)', node: '#9c27b0' },
+    lineage:  { edge: '#ffb300', bg: 'rgba(255,179,0,0.12)',  node: '#ff8f00' },
     complete: { bg: '#3a7bd5', border: '#5c9ce6' },
     incomplete: { bg: '#333348', border: '#555568' },
     selected: { bg: '#ef5350', border: '#ff7043' },
@@ -59,9 +61,11 @@
       state.allNodes = data.nodes || [];
       state.allRelationships = data.relationships || [];
       state.allTerpeneRels = data.terpeneRelationships || [];
+      state.allLineageRels = data.lineageRelationships || [];
       console.log('Nodes loaded:', state.allNodes.length);
       console.log('Genetic relationships loaded:', state.allRelationships.length);
       console.log('Terpene relationships loaded:', state.allTerpeneRels.length);
+      console.log('Lineage relationships loaded:', state.allLineageRels.length);
       renderStats();
       buildGraph();
       bindEvents();
@@ -320,10 +324,13 @@
       rels = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
     } else if (state.relType === 'terpene') {
       rels = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+    } else if (state.relType === 'lineage') {
+      rels = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
     } else { // combined
       const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
       const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-      rels = [...gen, ...terp];
+      const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
+      rels = [...gen, ...terp, ...lin];
     }
 
     const edgesMap = new Map();
@@ -332,13 +339,13 @@
     rels.forEach(rel => {
       const type = rel.type;
       const edgeColor = COLORS[type].edge;
-      const titlePrefix = type === 'genetic' ? 'Genetic' : 'Terpene';
+      const titlePrefix = type === 'genetic' ? 'Genetic' : (type === 'lineage' ? 'Lineage' : 'Terpene');
       const eid = [rel.from, rel.to].sort().join('|') + `|${type}`;
       
       // Filter out extremely weak connections to keep the graph clean,
       // but always allow top 5 closest terpene connections.
-      const maxDist = type === 'genetic' ? 0.35 : 0.5;
-      if (rel.distance <= maxDist || rel.is_top_5 || rel.guaranteed) {
+      const maxDist = type === 'genetic' ? 0.35 : (type === 'lineage' ? 1.0 : 0.5);
+      if (rel.distance <= maxDist || rel.is_top_5 || rel.guaranteed || type === 'lineage') {
         const value = 1 - rel.distance;
         if (edgesMap.has(eid)) {
           const existing = edgesMap.get(eid);
@@ -1432,10 +1439,13 @@
           pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
         } else if (state.relType === 'terpene') {
           pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+        } else if (state.relType === 'lineage') {
+          pool = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
         } else {
           const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
           const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-          pool = [...gen, ...terp];
+          const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
+          pool = [...gen, ...terp, ...lin];
         }
         renderFullPhylogeneticTree(container, state.nodes, pool, state.relType);
       }
@@ -1445,7 +1455,7 @@
   function switchRelType(type) {
     state.relType = type;
     document.querySelectorAll('.rel-btn').forEach(btn => {
-      btn.classList.remove('active-genetic', 'active-terpene', 'active-combined');
+      btn.classList.remove('active-genetic', 'active-terpene', 'active-lineage', 'active-combined');
       if (btn.dataset.rel === type) {
         btn.classList.add(`active-${type}`);
       }
@@ -1501,10 +1511,13 @@
         pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
       } else if (state.relType === 'terpene') {
         pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+      } else if (state.relType === 'lineage') {
+        pool = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
       } else { // combined
         const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
         const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-        pool = [...gen, ...terp];
+        const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
+        pool = [...gen, ...terp, ...lin];
       }
 
       const rels = pool
