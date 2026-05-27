@@ -51,6 +51,28 @@
     }
   };
 
+  // ── Physics Configuration ──
+  const CALM_PHYSICS = {
+    enabled: true,
+    solver: 'barnesHut',
+    barnesHut: {
+      gravitationalConstant: -2000,
+      centralGravity: 0.1,
+      springLength: 150,
+      springConstant: 0.015,
+      damping: 0.5,
+      avoidOverlap: 0.8
+    },
+    maxVelocity: 15,
+    minVelocity: 0.1,
+    timestep: 0.35,
+    stabilization: {
+      enabled: true,
+      iterations: 200,
+      updateInterval: 25
+    }
+  };
+
   // ── Init ──
   document.addEventListener('DOMContentLoaded', init);
 
@@ -136,11 +158,7 @@
       nodes: { shape: 'dot' },
       edges: { width: 1.5, smooth: { type: 'continuous' }, color: { opacity: 0.5 } },
       layout: { improvedLayout: false, randomSeed: 42 },
-      physics: {
-        enabled: true,
-        stabilization: { enabled: true, iterations: 200, updateInterval: 25 },
-        repulsion: { nodeDistance: 200, centralGravity: 0.08, springLength: 280, springConstant: 0.04, damping: 0.09 },
-      },
+      physics: CALM_PHYSICS,
       interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true, hideEdgesOnDrag: true, hideEdgesOnZoom: true },
     });
 
@@ -1468,6 +1486,7 @@
     if (state.network) {
       state.network.setOptions({
         physics: {
+          ...CALM_PHYSICS,
           enabled: true,
           stabilization: { enabled: true, iterations: 150, updateInterval: 25 }
         }
@@ -1562,9 +1581,9 @@
     state.physicsOn = !state.physicsOn;
     state.network.setOptions({
       physics: {
+        ...CALM_PHYSICS,
         enabled: state.physicsOn,
-        stabilization: { enabled: true, iterations: 100 },
-        repulsion: { nodeDistance: 200, centralGravity: 0.08, springLength: 280, springConstant: 0.04, damping: 0.09 },
+        stabilization: { enabled: true, iterations: 100 }
       },
     });
     document.getElementById('btn-physics').classList.toggle('active', state.physicsOn);
