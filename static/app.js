@@ -21,6 +21,7 @@
     currentView: 'network',
     physicsOn: false,
     showLineage: false,
+    isInitializing: false,
   };
 
   // ── Color palette ──
@@ -111,6 +112,7 @@
   // ── Build Vis.js Graph ──
   function buildGraph() {
     const container = document.getElementById('graph-container');
+    state.isInitializing = true;
 
     // Map nodes with dark-mode colors
     const nodeData = state.allNodes.map(n => {
@@ -168,6 +170,8 @@
       freezePositions();
       state.network.setOptions({ physics: { enabled: false } });
       state.physicsOn = false;
+      state.isInitializing = false;
+      refreshAllEdges();
     });
 
     // Click on node or background
@@ -206,8 +210,8 @@
     state.activeNodes.clear();
     state.activeNodes.add(nodeId);
     
-    // Re-populate edges if relation type is terpene/combined, or if showLineage is false
-    if (state.relType === 'terpene' || state.relType === 'combined' || (state.relType !== 'lineage' && !state.showLineage)) {
+    // Re-populate edges if relation type is genetic, terpene, combined, or if showLineage is false
+    if (state.relType === 'genetic' || state.relType === 'terpene' || state.relType === 'combined' || (state.relType !== 'lineage' && !state.showLineage)) {
       refreshAllEdges();
     } else {
       highlightNeighborhood(nodeId);
@@ -320,8 +324,8 @@
     });
     state.nodes.update(nodeUpdates);
 
-    // Rebuild edges to clear terpene/lineage details if relation type is terpene/combined, or if showLineage is false
-    if (state.relType === 'terpene' || state.relType === 'combined' || (state.relType !== 'lineage' && !state.showLineage)) {
+    // Rebuild edges to clear genetic/terpene/combined details if relation type is genetic/terpene/combined, or if showLineage is false
+    if (state.relType === 'genetic' || state.relType === 'terpene' || state.relType === 'combined' || (state.relType !== 'lineage' && !state.showLineage)) {
       refreshAllEdges();
       return;
     }
@@ -374,6 +378,11 @@
 
     // Filter out terpene relationships unless they connect to the currently active node
     rels = rels.filter(r => r.type !== 'terpene' || (activeNodeId && (r.from === activeNodeId || r.to === activeNodeId)));
+
+    // Filter out genetic relationships unless we are initializing or they connect to the currently active node
+    if (!state.isInitializing) {
+      rels = rels.filter(r => r.type !== 'genetic' || (activeNodeId && (r.from === activeNodeId || r.to === activeNodeId)));
+    }
 
     const edgesMap = new Map();
 
