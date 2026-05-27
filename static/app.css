@@ -296,6 +296,42 @@ body {
   color: var(--accent-purple);
 }
 
+/* ── Options Toggle ── */
+.options-toggle {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.checkbox-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-wrap input[type="checkbox"] {
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent-cyan);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  border-radius: 4px;
+}
+
+.checkbox-wrap label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  transition: color var(--transition);
+}
+
+.checkbox-wrap input[type="checkbox"]:hover + label,
+.checkbox-wrap label:hover {
+  color: var(--text-primary);
+}
+
 /* ── Strain Info Panel ── */
 #strain-panel {
   flex: 1;

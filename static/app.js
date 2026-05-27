@@ -20,6 +20,7 @@
     relType: 'genetic',   // 'genetic' | 'terpene' | 'lineage' | 'combined'
     currentView: 'network',
     physicsOn: false,
+    showLineage: false,
   };
 
   // ── Color palette ──
@@ -54,17 +55,17 @@
   // ── Physics Configuration ──
   const CALM_PHYSICS = {
     enabled: true,
-    solver: 'barnesHut',
-    barnesHut: {
-      gravitationalConstant: -2000,
-      centralGravity: 0.1,
-      springLength: 150,
-      springConstant: 0.015,
-      damping: 0.5,
-      avoidOverlap: 0.8
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {
+      gravitationalConstant: -120, // Stronger repulsion for clustered nodes
+      centralGravity: 0.01,         // Pull towards the center to avoid flying away
+      springLength: 200,           // Disperse nodes further
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 1.0            // Avoid overlap entirely
     },
     maxVelocity: 15,
-    minVelocity: 0.1,
+    minVelocity: 0.5,
     timestep: 0.35,
     stabilization: {
       enabled: true,
@@ -203,7 +204,13 @@
 
     state.activeNodes.clear();
     state.activeNodes.add(nodeId);
-    highlightNeighborhood(nodeId);
+    
+    // Re-populate edges first (if showLineage is false, this includes the active node's lineage edges!)
+    if (state.relType !== 'lineage' && !state.showLineage) {
+      refreshAllEdges();
+    } else {
+      highlightNeighborhood(nodeId);
+    }
   }
 
   // ── Edge Management & Neighborhood Highlighting ──
@@ -312,6 +319,12 @@
     });
     state.nodes.update(nodeUpdates);
 
+    // If showLineage is false, rebuild the edges to remove the deselected node's lineage edges
+    if (state.relType !== 'lineage' && !state.showLineage) {
+      refreshAllEdges();
+      return;
+    }
+
     if (!state.edges) return;
     const edgeUpdates = [];
     state.edges.forEach(edge => {
@@ -349,6 +362,12 @@
       const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
       const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
       rels = [...gen, ...terp, ...lin];
+    }
+
+    // Filter out lineage relationships if showLineage is false and we aren't explicitly in the lineage view
+    if (state.relType !== 'lineage' && !state.showLineage) {
+      const activeNodeId = state.activeNodes.size > 0 ? Array.from(state.activeNodes)[0] : null;
+      rels = rels.filter(r => r.type !== 'lineage' || (activeNodeId && (r.from === activeNodeId || r.to === activeNodeId)));
     }
 
     const edgesMap = new Map();
@@ -958,6 +977,31 @@
     document.querySelectorAll('.rel-btn').forEach(btn => {
       btn.addEventListener('click', () => switchRelType(btn.dataset.rel));
     });
+
+    // Lineage toggle checkbox
+    const chkLineage = document.getElementById('chk-show-lineage');
+    if (chkLineage) {
+      chkLineage.addEventListener('change', (e) => {
+        state.showLineage = e.target.checked;
+        refreshAllEdges();
+        
+        // Re-enable physics to stabilize
+        if (state.network) {
+          state.network.setOptions({
+            physics: {
+              ...CALM_PHYSICS,
+              enabled: true,
+              stabilization: { enabled: true, iterations: 150, updateInterval: 25 }
+            }
+          });
+          state.physicsOn = true;
+          state.network.once('stabilizationIterationsDone', () => {
+            state.network.setOptions({ physics: { enabled: false } });
+            state.physicsOn = false;
+          });
+        }
+      });
+    }
 
 
 
