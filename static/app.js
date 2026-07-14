@@ -902,8 +902,8 @@
     if (tNeighbors && tNeighbors.length) {
       html += `<div class="card-section"><h3>Terpene Neighbors</h3><ul class="neighbor-list">`;
       tNeighbors.slice(0, 15).forEach(n => {
-        html += `<li class="neighbor-item" data-strain="${n.strain}">
-          <span>${(n.strain || '').replace(/_/g, ' ')}</span>
+        html += `<li class="neighbor-item" data-strain="${escapeHtml(n.strain)}">
+          <span>${escapeHtml((n.strain || '').replace(/_/g, ' '))}</span>
           <span class="dist">${n.distance.toFixed(3)}</span>
         </li>`;
       });
@@ -913,8 +913,8 @@
     // Blockchain
     if (d.blockchain && d.blockchain.txid) {
       html += `<div class="card-section"><h3>Blockchain Provenance</h3>
-        <div class="meta-item" style="margin-bottom:6px"><div class="label">TX ID</div><div class="value" style="font-size:11px;word-break:break-all">${d.blockchain.txid}</div></div>
-        ${d.blockchain.shasum ? `<div class="meta-item"><div class="label">SHASUM</div><div class="value" style="font-size:11px;word-break:break-all">${d.blockchain.shasum}</div></div>` : ''}
+        <div class="meta-item" style="margin-bottom:6px"><div class="label">TX ID</div><div class="value" style="font-size:11px;word-break:break-all">${escapeHtml(d.blockchain.txid)}</div></div>
+        ${d.blockchain.shasum ? `<div class="meta-item"><div class="label">SHASUM</div><div class="value" style="font-size:11px;word-break:break-all">${escapeHtml(d.blockchain.shasum)}</div></div>` : ''}
       </div>`;
     }
 
