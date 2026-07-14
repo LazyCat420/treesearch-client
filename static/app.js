@@ -925,8 +925,8 @@
   function renderBasicCard(name, node) {
     const status = node && node.complete ? 'Complete' : 'Community data only — no genomic sample';
     return `<div class="strain-card">
-      <h2>${(name || '').replace(/_/g, ' ')}</h2>
-      ${node && node.rsp ? `<span class="rsp-badge">${node.rsp}</span>` : ''}
+      <h2>${escapeHtml((name || '').replace(/_/g, ' '))}</h2>
+      ${node && node.rsp ? `<span class="rsp-badge">${escapeHtml(node.rsp)}</span>` : ''}
       <div class="card-section">
         <div class="meta-item"><div class="label">Status</div><div class="value">${status}</div></div>
       </div>
@@ -1098,7 +1098,7 @@
             </div>
             <div>
               <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Flowering Time (days)</label>
-              <input type="number" name="avg_flowering_days" value="${currentFlowering}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+              <input type="number" name="avg_flowering_days" value="${escapeHtml(currentFlowering)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
             </div>
             <div>
               <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Parent Lineage (comma-separated)</label>
@@ -1114,11 +1114,11 @@
               <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">THC %</label>
-                  <input type="number" step="0.01" name="thc" value="${currentTHC}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.01" name="thc" value="${escapeHtml(currentTHC)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">CBD %</label>
-                  <input type="number" step="0.01" name="cbd" value="${currentCBD}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.01" name="cbd" value="${escapeHtml(currentCBD)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
               </div>
             </div>
@@ -1128,39 +1128,39 @@
               <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Myrcene</label>
-                  <input type="number" step="0.001" name="myrcene" value="${currentMyrcene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="myrcene" value="${escapeHtml(currentMyrcene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Limonene</label>
-                  <input type="number" step="0.001" name="limonene" value="${currentLimonene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="limonene" value="${escapeHtml(currentLimonene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Caryophyllene</label>
-                  <input type="number" step="0.001" name="caryophyllene" value="${currentCaryophyllene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="caryophyllene" value="${escapeHtml(currentCaryophyllene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Pinene Alpha</label>
-                  <input type="number" step="0.001" name="pinene_alpha" value="${currentPineneAlpha}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="pinene_alpha" value="${escapeHtml(currentPineneAlpha)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Pinene Beta</label>
-                  <input type="number" step="0.001" name="pinene_beta" value="${currentPineneBeta}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="pinene_beta" value="${escapeHtml(currentPineneBeta)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Linalool</label>
-                  <input type="number" step="0.001" name="linalool" value="${currentLinalool}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="linalool" value="${escapeHtml(currentLinalool)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Humulene</label>
-                  <input type="number" step="0.001" name="humulene" value="${currentHumulene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="humulene" value="${escapeHtml(currentHumulene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Terpinolene</label>
-                  <input type="number" step="0.001" name="terpinolene" value="${currentTerpinolene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="terpinolene" value="${escapeHtml(currentTerpinolene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
                 <div>
                   <label style="display:block; font-size:10px; color:var(--text-muted); margin-bottom:2px;">Ocimene</label>
-                  <input type="number" step="0.001" name="ocimene" value="${currentOcimene}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
+                  <input type="number" step="0.001" name="ocimene" value="${escapeHtml(currentOcimene)}" style="width:100%; box-sizing: border-box; padding:6px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:var(--text-primary); font-size:12px;" />
                 </div>
               </div>
             </div>
