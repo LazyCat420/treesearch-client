@@ -7,13 +7,15 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships, relType 
     const processedNodes = new Set();
     const processedEdges = new Set();
     
-    // Get all nodes that are either complete (blue) or incomplete (grey)
-    const allStrains = nodes.get().filter(node => 
-        node.color?.background === '#2B7CE9' || node.color?.background === '#97C2FC'
-    );
-    
-    // Sort strains by RSP number for consistent root selection
-    allStrains.sort((a, b) => (a.rsp || '').localeCompare(b.rsp || ''));
+    // Use every node in the graph as a tree candidate
+    const allStrains = nodes.get();
+
+    // Sort strains by RSP number (falling back to label/id) for consistent root selection
+    allStrains.sort((a, b) => {
+        const byRsp = (a.rsp || '').localeCompare(b.rsp || '');
+        if (byRsp !== 0) return byRsp;
+        return String(a.label || a.id).localeCompare(String(b.label || b.id));
+    });
     
     const nodesToAdd = [];
     const edgesToAdd = [];
@@ -89,10 +91,13 @@ function renderFullPhylogeneticTree(container, nodes, allRelationships, relType 
         });
     }
     
-    // Start with the first strain as root
-    if (allStrains.length > 0) {
-        addNodeToTree(allStrains[0].id, 0);
-    }
+    // Seed every strain that isn't already part of a tree as a new root,
+    // so disconnected components render as a forest instead of a single tree.
+    allStrains.forEach(strain => {
+        if (!processedNodes.has(strain.id)) {
+            addNodeToTree(strain.id, 0);
+        }
+    });
     
     if (nodesToAdd.length > 0) {
         treeNodes.add(nodesToAdd);

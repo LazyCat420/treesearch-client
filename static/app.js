@@ -16,7 +16,6 @@
     allTerpeneRels: [],
     allLineageRels: [],
     activeNodes: new Set(),
-    currentEdges: new Set(),
     relType: 'genetic',   // 'genetic' | 'terpene' | 'lineage' | 'combined'
     currentView: 'network',
     physicsOn: false,
@@ -78,14 +77,20 @@
   // ── Init ──
   document.addEventListener('DOMContentLoaded', init);
 
+  // Assigns every relationship array from a /api/network-data payload.
+  // Deliberately does NOT call renderStats()/buildGraph() — callers gate those.
+  function applyNetworkData(data) {
+    state.allNodes = data.nodes || [];
+    state.allRelationships = data.relationships || [];
+    state.allTerpeneRels = data.terpeneRelationships || [];
+    state.allLineageRels = data.lineageRelationships || [];
+  }
+
   async function init() {
     try {
       const resp = await fetch('/api/network-data');
       const data = await resp.json();
-      state.allNodes = data.nodes || [];
-      state.allRelationships = data.relationships || [];
-      state.allTerpeneRels = data.terpeneRelationships || [];
-      state.allLineageRels = data.lineageRelationships || [];
+      applyNetworkData(data);
       console.log('Nodes loaded:', state.allNodes.length);
       console.log('Genetic relationships loaded:', state.allRelationships.length);
       console.log('Terpene relationships loaded:', state.allTerpeneRels.length);
@@ -171,7 +176,11 @@
       state.network.setOptions({ physics: { enabled: false } });
       state.physicsOn = false;
       state.isInitializing = false;
-      refreshAllEdges();
+      // Only re-filter edges when something is selected: with no selection the
+      // filters in refreshAllEdges() strip every edge and the graph goes blank.
+      if (state.activeNodes.size > 0) {
+        refreshAllEdges();
+      }
     });
 
     // Click on node or background
@@ -219,13 +228,22 @@
   }
 
   // ── Edge Management & Neighborhood Highlighting ──
-  function relForEdgeId(eid) {
-    const parts = eid.split('|');
-    const from = parts[0];
-    const to = parts[1];
-    const type = parts[2];
-    const pool = type === 'genetic' ? state.allRelationships : state.allTerpeneRels;
-    return pool.find(r => (r.from === from && r.to === to) || (r.from === to && r.to === from));
+  // Builds the pool of relationships for a given relation type, tagged with their type.
+  function getRelPool(relType) {
+    if (relType === 'genetic') {
+      return state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+    }
+    if (relType === 'terpene') {
+      return state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+    }
+    if (relType === 'lineage') {
+      return state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
+    }
+    // combined
+    const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
+    const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
+    const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
+    return [...gen, ...terp, ...lin];
   }
 
   function highlightNeighborhood(nodeId) {
@@ -284,9 +302,8 @@
       const isConnected = connectedEdges.has(edge.id);
       const parts = edge.id.split('|');
       const type = parts[parts.length - 1];
-      const rel = relForEdgeId(edge.id);
-      const distance = rel ? rel.distance : 0.5;
-      
+      const distance = edge.distance ?? 0.5;
+
       edgeUpdates.push({
         id: edge.id,
         color: {
@@ -335,9 +352,8 @@
     state.edges.forEach(edge => {
       const parts = edge.id.split('|');
       const type = parts[parts.length - 1];
-      const rel = relForEdgeId(edge.id);
-      const distance = rel ? rel.distance : 0.5;
-      
+      const distance = edge.distance ?? 0.5;
+
       edgeUpdates.push({
         id: edge.id,
         color: {
@@ -352,22 +368,9 @@
 
   function refreshAllEdges() {
     state.edges.clear();
-    state.currentEdges.clear();
-    
+
     // Determine pool of relationships to use
-    let rels = [];
-    if (state.relType === 'genetic') {
-      rels = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-    } else if (state.relType === 'terpene') {
-      rels = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-    } else if (state.relType === 'lineage') {
-      rels = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-    } else { // combined
-      const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-      const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-      const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-      rels = [...gen, ...terp, ...lin];
-    }
+    let rels = getRelPool(state.relType);
 
     const activeNodeId = state.activeNodes.size > 0 ? Array.from(state.activeNodes)[0] : null;
 
@@ -402,6 +405,7 @@
           const existing = edgesMap.get(eid);
           if (value > existing.value) {
             existing.value = value;
+            existing.distance = rel.distance;
             existing.length = rel.distance * 350;
             existing.title = `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`;
             existing.color = { color: edgeColor, opacity: Math.max(0.1, value * 0.4) };
@@ -415,13 +419,13 @@
           from: rel.from,
           to: rel.to,
           value: value,
+          distance: rel.distance,
           length: rel.distance * 350,
           title: `${titlePrefix} Distance: ${rel.distance.toFixed(3)}`,
           color: { color: edgeColor, opacity: Math.max(0.1, value * 0.4) },
           width: Math.max(0.5, 2 * value),
         };
         edgesMap.set(eid, newEdge);
-        state.currentEdges.add(eid);
       }
     });
 
@@ -443,18 +447,21 @@
     const panel = document.getElementById('strain-panel');
     panel.innerHTML = `<div class="empty-state"><div class="loading-spinner"></div><div>Loading...</div></div>`;
 
-    try {
-      let resp;
-      const isImport = (source === 'seedfinder' || source === 'forum' || source === 'free-text') || force;
-      if (isImport) {
-        const useSource = source || (breederSlug === 'forum-import' ? 'forum' : 'seedfinder');
-        const useRealName = realName || strainName;
-        const useStrainSlug = strainSlug || strainName.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
-        const useBreederSlug = breederSlug || 'forum-import';
+    const isImport = (source === 'seedfinder' || source === 'forum' || source === 'free-text') || force;
 
+    if (isImport) {
+      const useSource = source || (breederSlug === 'forum-import' ? 'forum' : 'seedfinder');
+      const useRealName = realName || strainName;
+      const useStrainSlug = strainSlug || strainName.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
+      const useBreederSlug = breederSlug || 'forum-import';
+
+      // Progress percentage reported by the backend; forced monotonic so the bar never rewinds.
+      let lastPct = 0;
+
+      try {
         panel.innerHTML = `
           <div class="import-progress-card">
-            <h3>Importing ${useRealName}</h3>
+            <h3>Importing ${escapeHtml(useRealName)}</h3>
             <div class="import-progress-status" id="import-status">Initializing...</div>
             <div class="import-progress-bar-wrap">
               <div class="import-progress-bar" id="import-bar" style="width: 0%"></div>
@@ -472,45 +479,6 @@
           </div>
         `;
 
-        function estimateProgress(message) {
-          if (!message) return 0;
-          const msg = message.toLowerCase();
-          if (msg.includes("initializing")) return 5;
-          if (msg.includes("fetching metadata")) return 10;
-          if (msg.includes("scraping overgrow")) return 20;
-          if (msg.includes("overgrow complete") || msg.includes("scraping rollitup")) return 35;
-          if (msg.includes("rollitup thread")) {
-            const match = msg.match(/thread\s+(\d+)\/(\d+)/);
-            if (match) {
-              const current = parseInt(match[1]);
-              const total = parseInt(match[2]);
-              return 35 + Math.round((current / total) * 15);
-            }
-            return 45;
-          }
-          if (msg.includes("rollitup complete") || msg.includes("scraping thcfarmer")) return 50;
-          if (msg.includes("thcfarmer thread")) {
-            const match = msg.match(/thread\s+(\d+)\/(\d+)/);
-            if (match) {
-              const current = parseInt(match[1]);
-              const total = parseInt(match[2]);
-              return 50 + Math.round((current / total) * 15);
-            }
-            return 60;
-          }
-          if (msg.includes("thcfarmer complete") || msg.includes("scraping icmag")) return 65;
-          if (msg.includes("icmag thread")) {
-            const match = msg.match(/thread\s+(\d+)\/(\d+)/);
-            if (match) {
-              const current = parseInt(match[1]);
-              const total = parseInt(match[2]);
-              return 65 + Math.round((current / total) * 20);
-            }
-            return 75;
-          }
-          return 90;
-        }
-
         const importPayload = {
           strain_slug: useStrainSlug,
           breeder_slug: useBreederSlug,
@@ -520,14 +488,14 @@
           importPayload.query = strainName;
         }
 
-        resp = await fetch('/api/strains/import', {
+        const resp = await fetch('/api/strains/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(importPayload)
         });
 
         if (!resp.ok) {
-          throw new Error('Failed to start import');
+          throw new Error(`Failed to start import (HTTP ${resp.status})`);
         }
 
         const reader = resp.body.getReader();
@@ -544,32 +512,34 @@
 
           for (const line of lines) {
             if (!line.trim()) continue;
+
+            let packet;
             try {
-              const packet = JSON.parse(line);
-              if (packet.type === 'progress') {
-                const statusEl = document.getElementById('import-status');
-                const barEl = document.getElementById('import-bar');
-                const postsEl = document.getElementById('progress-posts-count');
-                const imagesEl = document.getElementById('progress-images-count');
-                
-                if (statusEl) statusEl.textContent = packet.message;
-                if (postsEl) postsEl.textContent = packet.posts || 0;
-                if (imagesEl) imagesEl.textContent = packet.images || 0;
-                
-                if (barEl) {
-                  const pct = estimateProgress(packet.message);
-                  barEl.style.width = `${pct}%`;
-                }
-              } else if (packet.type === 'done') {
-                finalData = packet.data;
-              } else if (packet.type === 'error') {
-                throw new Error(packet.error || 'Import failed');
+              packet = JSON.parse(line);
+            } catch (parseErr) {
+              console.error('Failed to parse NDJSON line:', parseErr);
+              continue;
+            }
+
+            if (packet.type === 'progress') {
+              const statusEl = document.getElementById('import-status');
+              const barEl = document.getElementById('import-bar');
+              const postsEl = document.getElementById('progress-posts-count');
+              const imagesEl = document.getElementById('progress-images-count');
+
+              if (statusEl) statusEl.textContent = packet.message || '';
+              if (postsEl) postsEl.textContent = packet.posts || 0;
+              if (imagesEl) imagesEl.textContent = packet.images || 0;
+
+              const pct = Number.isFinite(packet.percent) ? packet.percent : lastPct;
+              lastPct = Math.max(lastPct, pct);
+              if (barEl) {
+                barEl.style.width = `${lastPct}%`;
               }
-            } catch (err) {
-              console.error('Failed to parse NDJSON line:', err);
-              if (err.message.includes('Import failed') || err.message.includes('Failed to start import')) {
-                throw err;
-              }
+            } else if (packet.type === 'done') {
+              finalData = packet.data;
+            } else if (packet.type === 'error') {
+              throw new Error(packet.error || 'Import failed');
             }
           }
         }
@@ -590,12 +560,11 @@
           const ndResp = await fetch('/api/network-data');
           if (ndResp.ok) {
             const ndData = await ndResp.json();
-            state.allNodes = ndData.nodes || [];
-            state.allRelationships = ndData.relationships || [];
-            state.allTerpeneRels = ndData.terpeneRelationships || [];
+            applyNetworkData(ndData);
             console.log('Nodes loaded after import:', state.allNodes.length);
             console.log('Genetic relationships loaded after import:', state.allRelationships.length);
             console.log('Terpene relationships loaded after import:', state.allTerpeneRels.length);
+            console.log('Lineage relationships loaded after import:', state.allLineageRels.length);
             renderStats();
             if (state.currentView === 'network') {
               buildGraph();
@@ -611,22 +580,33 @@
         } catch (ndErr) {
           console.error('Failed to update network graph:', ndErr);
         }
+      } catch (err) {
+        // An import that dies must never look like a successful read.
+        console.error('Import failed:', err);
+        panel.innerHTML = renderImportErrorCard(useRealName, err.message, {
+          source: useSource,
+          strainSlug: useStrainSlug,
+          breederSlug: useBreederSlug,
+          force: force,
+        });
+      }
+      return;
+    }
 
-      } else {
-        resp = await fetch(`/api/strains/${encodeURIComponent(strainName)}/detail`);
-        if (!resp.ok) throw new Error('Not found');
-        const d = await resp.json();
-        state.currentStrainData = d;
-        panel.innerHTML = renderStrainCard(d);
-        if (typeof renderLineageTree === 'function') {
-          renderLineageTree(d.name, d.lineage);
-        }
+    try {
+      const resp = await fetch(`/api/strains/${encodeURIComponent(strainName)}/detail`);
+      if (!resp.ok) throw new Error('Not found');
+      const d = await resp.json();
+      state.currentStrainData = d;
+      panel.innerHTML = renderStrainCard(d);
+      if (typeof renderLineageTree === 'function') {
+        renderLineageTree(d.name, d.lineage);
+      }
 
-        // Focus and activate in graph if view is network
-        if (state.currentView === 'network' && state.nodes && state.nodes.get(d.name) && state.network) {
-          state.network.selectNodes([d.name]);
-          activateNode(d.name);
-        }
+      // Focus and activate in graph if view is network
+      if (state.currentView === 'network' && state.nodes && state.nodes.get(d.name) && state.network) {
+        state.network.selectNodes([d.name]);
+        activateNode(d.name);
       }
     } catch (err) {
       // Fallback for strains with no sample data
@@ -676,7 +656,7 @@
 
     let html = `<div class="strain-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap: 10px; flex-wrap: wrap;">
-        <h2 style="margin:0">${(d.name || '').replace(/_/g, ' ')}</h2>
+        <h2 style="margin:0">${escapeHtml((d.name || '').replace(/_/g, ' '))}</h2>
         ${d.strain_slug && d.breeder_slug ? `
           <button class="rescraped-btn" data-strain-slug="${escapeHtml(d.strain_slug)}" data-breeder-slug="${escapeHtml(d.breeder_slug)}" data-real-name="${escapeHtml(d.name)}" style="background:rgba(0, 242, 254, 0.1); border:1px solid var(--accent-cyan); color:var(--accent-cyan); padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:600; transition:all 0.2s;">
             🔄 Re-scrape & Reset Cache
@@ -684,7 +664,7 @@
         ` : ''}
       </div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
-        ${d.rsp ? `<span class="rsp-badge">${d.rsp}</span>` : `<span class="rsp-badge community">Community Data Only</span>`}
+        ${d.rsp ? `<span class="rsp-badge">${escapeHtml(d.rsp)}</span>` : `<span class="rsp-badge community">Community Data Only</span>`}
         <span class="rsp-badge ${badgeClass}">${badgeText}</span>
       </div>`;
 
@@ -708,9 +688,9 @@
         </button>
       </div>
       <div class="meta-grid">`;
-    if (d.breeder) html += `<div class="meta-item"><div class="label">Breeder</div><div class="value">${d.breeder}</div></div>`;
-    if (d.strain_type) html += `<div class="meta-item"><div class="label">Type</div><div class="value">${d.strain_type}</div></div>`;
-    if (d.avg_flowering_days) html += `<div class="meta-item"><div class="label">Flowering</div><div class="value">${d.avg_flowering_days} days</div></div>`;
+    if (d.breeder) html += `<div class="meta-item"><div class="label">Breeder</div><div class="value">${escapeHtml(d.breeder)}</div></div>`;
+    if (d.strain_type) html += `<div class="meta-item"><div class="label">Type</div><div class="value">${escapeHtml(d.strain_type)}</div></div>`;
+    if (d.avg_flowering_days) html += `<div class="meta-item"><div class="label">Flowering</div><div class="value">${escapeHtml(d.avg_flowering_days)} days</div></div>`;
     html += `</div>`;
     if (d.description) {
       if (d.translated_description) {
@@ -722,7 +702,7 @@
             ${escapeHtml(d.description)}
           </p>
           <button class="translate-toggle-btn" data-lang="${escapeHtml(d.detected_language || 'es')}" style="background:none;border:none;color:var(--accent-cyan);font-size:11px;font-weight:600;cursor:pointer;padding:4px 0;margin-top:4px;display:block">
-            Auto-translated to English. Show original (${(d.detected_language || 'es').toUpperCase()})
+            Auto-translated to English. Show original (${escapeHtml((d.detected_language || 'es').toUpperCase())})
           </button>
         </div>`;
       } else {
@@ -739,7 +719,7 @@
         lineageText = d.lineage;
       }
       if (lineageText) {
-        html += `<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">Lineage:</span> <span style="color:var(--text-secondary);font-size:12px">${lineageText}</span></div>`;
+        html += `<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">Lineage:</span> <span style="color:var(--text-secondary);font-size:12px">${escapeHtml(lineageText)}</span></div>`;
       }
     }
 
@@ -764,10 +744,10 @@
         ['Accession', d.metadata.accession_date],
       ];
       fields.forEach(([label, val]) => {
-        if (val) html += `<div class="meta-item"><div class="label">${label}</div><div class="value">${val}</div></div>`;
+        if (val) html += `<div class="meta-item"><div class="label">${label}</div><div class="value">${escapeHtml(val)}</div></div>`;
       });
       if (d.metadata.heterozygosity != null) {
-        html += `<div class="meta-item"><div class="label">Heterozygosity</div><div class="value">${d.metadata.heterozygosity}%</div></div>`;
+        html += `<div class="meta-item"><div class="label">Heterozygosity</div><div class="value">${escapeHtml(d.metadata.heterozygosity)}%</div></div>`;
       }
       html += `</div></div>`;
     }
@@ -779,7 +759,7 @@
       Object.entries(d.cannabinoids).forEach(([name, val]) => {
         const pct = Math.min(val / 30 * 100, 100);
         html += `<div class="chem-bar-wrap">
-          <div class="chem-bar-label"><span class="name">${name}</span><span class="val">${val.toFixed(2)}%</span></div>
+          <div class="chem-bar-label"><span class="name">${escapeHtml(name)}</span><span class="val">${val.toFixed(2)}%</span></div>
           <div class="chem-bar"><div class="chem-bar-fill cannabinoid" style="width:${pct}%"></div></div>
         </div>`;
       });
@@ -794,7 +774,7 @@
       sorted.forEach(([name, val]) => {
         const pct = Math.min(val / Math.max(maxTerp, 0.5) * 100, 100);
         html += `<div class="chem-bar-wrap">
-          <div class="chem-bar-label"><span class="name">${name}</span><span class="val">${val.toFixed(3)}%</span></div>
+          <div class="chem-bar-label"><span class="name">${escapeHtml(name)}</span><span class="val">${val.toFixed(3)}%</span></div>
           <div class="chem-bar"><div class="chem-bar-fill terpene" style="width:${pct}%"></div></div>
         </div>`;
       });
@@ -829,17 +809,19 @@
 
       html += `<div class="card-section"><h3>Plant Pictures (Clustered)</h3>`;
       Object.entries(clusters).forEach(([clusterId, imgs]) => {
-        const title = clusterId === 'unclustered' ? 'Unclustered' : `Cluster ${clusterId}`;
+        const title = clusterId === 'unclustered' ? 'Unclustered' : `Cluster ${escapeHtml(clusterId)}`;
         html += `<div class="image-cluster-group">
           <div class="cluster-header">${title} (${imgs.length})</div>
           <div class="image-gallery-grid">`;
         imgs.forEach(img => {
-          const cleanedUrl = cleanImageUrl(img.image_url);
+          const cleanedUrl = safeUrl(cleanImageUrl(img.image_url));
+          const sourceUrl = safeUrl(img.source_url);
+          // A broken hotlink is hidden outright — never substituted with a stock photo.
           html += `<div class="gallery-image-card">
-            <img src="${cleanedUrl}" alt="Strain image" onerror="this.src='https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=300'" class="gallery-img" />
+            <img src="${escapeHtml(cleanedUrl)}" alt="Strain image" onerror="this.style.display='none'" class="gallery-img" />
             <div class="img-meta">
-              <span>By ${img.author || 'Anonymous'}</span>
-              ${img.source_url ? `<a href="${img.source_url}" target="_blank" class="source-link-icon" title="View Source Post">🔗</a>` : ''}
+              <span>By ${escapeHtml(img.author || 'Anonymous')}</span>
+              ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" class="source-link-icon" title="View Source Post">🔗</a>` : ''}
             </div>
           </div>`;
         });
@@ -866,7 +848,7 @@
       Object.entries(counts).forEach(([src, count]) => {
         if (src === 'all') return;
         const displayName = src.charAt(0).toUpperCase() + src.slice(1);
-        html += `<button class="obs-tab-btn" data-source="${src}" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:600; transition:all 0.2s;">
+        html += `<button class="obs-tab-btn" data-source="${escapeHtml(src)}" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:600; transition:all 0.2s;">
           ${escapeHtml(displayName)} (${count})
         </button>`;
       });
@@ -886,16 +868,16 @@
         const displayDate = obs.observed_at ? new Date(obs.observed_at).toLocaleDateString() : '';
         const srcLower = (obs.source_name || 'unknown').toLowerCase();
         
-        html += `<div class="observation-quote-card" data-source="${srcLower}">
+        html += `<div class="observation-quote-card" data-source="${escapeHtml(srcLower)}">
           <div class="observation-header">
             <span class="observation-title">${escapeHtml(title || 'Observation Note')}</span>
-            <span class="observation-date">${displayDate}</span>
+            <span class="observation-date">${escapeHtml(displayDate)}</span>
           </div>
           <blockquote class="observation-quote" id="obs-text-${idx}" data-full="${escapedFull}" data-short="${escapedShort}">"${isLong ? escapedShort : escapedFull}"</blockquote>
           ${isLong ? `<button class="expand-btn" data-idx="${idx}">Show More</button>` : ''}
           <div class="quote-footer">
             <span class="author">— ${escapeHtml(obs.author || 'Anonymous')}</span>
-            <span class="source">via <span class="source-badge ${srcLower}">${escapeHtml(obs.source_name || 'Source')}</span> ${obs.source_url ? `<a href="${obs.source_url}" target="_blank" class="source-link-icon" title="View Source Post">🔗</a>` : ''}</span>
+            <span class="source">via <span class="source-badge ${escapeHtml(srcLower)}">${escapeHtml(obs.source_name || 'Source')}</span> ${safeUrl(obs.source_url) ? `<a href="${escapeHtml(safeUrl(obs.source_url))}" target="_blank" rel="noopener noreferrer" class="source-link-icon" title="View Source Post">🔗</a>` : ''}</span>
           </div>
         </div>`;
       });
@@ -907,8 +889,8 @@
     if (neighbors && neighbors.length) {
       html += `<div class="card-section"><h3>Genetic Neighbors</h3><ul class="neighbor-list">`;
       neighbors.slice(0, 15).forEach(n => {
-        html += `<li class="neighbor-item" data-strain="${n.strain}">
-          <span>${(n.strain || '').replace(/_/g, ' ')}</span>
+        html += `<li class="neighbor-item" data-strain="${escapeHtml(n.strain)}">
+          <span>${escapeHtml((n.strain || '').replace(/_/g, ' '))}</span>
           <span class="dist">${n.distance.toFixed(3)}</span>
         </li>`;
       });
@@ -954,6 +936,32 @@
           <div class="empty-tree-state">Building family tree...</div>
         </div>
       </div>
+    </div>`;
+  }
+
+  function renderImportErrorCard(name, message, retry) {
+    return `<div class="strain-card">
+      <h2>${escapeHtml((name || '').replace(/_/g, ' '))}</h2>
+      <div class="community-notice-box">
+        <div class="community-notice-title">
+          <span>⚠️</span> Import Failed
+        </div>
+        <div>
+          The scrape did not complete, so no data was saved for this strain.
+        </div>
+        <div style="margin-top:8px;color:var(--text-secondary);font-size:12px;word-break:break-word">
+          ${escapeHtml(message || 'Unknown error')}
+        </div>
+      </div>
+      <button class="import-retry-btn"
+        data-real-name="${escapeHtml(name)}"
+        data-source="${escapeHtml(retry.source)}"
+        data-strain-slug="${escapeHtml(retry.strainSlug)}"
+        data-breeder-slug="${escapeHtml(retry.breederSlug)}"
+        data-force="${retry.force ? '1' : '0'}"
+        style="background:rgba(0, 242, 254, 0.1); border:1px solid var(--accent-cyan); color:var(--accent-cyan); padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer; font-weight:600;">
+        🔄 Retry Import
+      </button>
     </div>`;
   }
 
@@ -1015,13 +1023,19 @@
 
 
 
-    // Graph controls
-    document.getElementById('btn-zoom-in').addEventListener('click', () =>
-      state.network.moveTo({ scale: state.network.getScale() * 1.3, animation: true }));
-    document.getElementById('btn-zoom-out').addEventListener('click', () =>
-      state.network.moveTo({ scale: state.network.getScale() * 0.7, animation: true }));
-    document.getElementById('btn-fit').addEventListener('click', () =>
-      state.network.fit({ animation: { duration: 400 } }));
+    // Graph controls (no-ops when the network has been torn down for a tree view)
+    document.getElementById('btn-zoom-in').addEventListener('click', () => {
+      if (!state.network) return;
+      state.network.moveTo({ scale: state.network.getScale() * 1.3, animation: true });
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', () => {
+      if (!state.network) return;
+      state.network.moveTo({ scale: state.network.getScale() * 0.7, animation: true });
+    });
+    document.getElementById('btn-fit').addEventListener('click', () => {
+      if (!state.network) return;
+      state.network.fit({ animation: { duration: 400 } });
+    });
     document.getElementById('btn-physics').addEventListener('click', togglePhysics);
 
     // Click delegation for neighbor items and expand buttons
@@ -1166,6 +1180,13 @@
         return;
       }
 
+      const retryBtn = e.target.closest('.import-retry-btn');
+      if (retryBtn) {
+        const d = retryBtn.dataset;
+        loadStrainDetail(d.realName, d.source, d.strainSlug, d.breederSlug, d.realName, d.force === '1');
+        return;
+      }
+
       const rescrapeBtn = e.target.closest('.rescraped-btn');
       if (rescrapeBtn) {
         const strainSlug = rescrapeBtn.dataset.strainSlug;
@@ -1178,7 +1199,9 @@
       const item = e.target.closest('.neighbor-item');
       if (item) {
         const name = item.dataset.strain;
-        state.network.focus(name, { scale: 1.2, animation: { duration: 400 } });
+        if (state.network && state.nodes && state.nodes.get(name)) {
+          state.network.focus(name, { scale: 1.2, animation: { duration: 400 } });
+        }
         if (!state.activeNodes.has(name)) {
           handleNodeClick(name);
         } else {
@@ -1318,12 +1341,11 @@
         const ndResp = await fetch('/api/network-data');
         if (ndResp.ok) {
           const ndData = await ndResp.json();
-          state.allNodes = ndData.nodes || [];
-          state.allRelationships = ndData.relationships || [];
-          state.allTerpeneRels = ndData.terpeneRelationships || [];
+          applyNetworkData(ndData);
           console.log('Nodes loaded after update:', state.allNodes.length);
           console.log('Genetic relationships loaded after update:', state.allRelationships.length);
           console.log('Terpene relationships loaded after update:', state.allTerpeneRels.length);
+          console.log('Lineage relationships loaded after update:', state.allLineageRels.length);
           renderStats();
           if (state.currentView === 'network') {
             buildGraph();
@@ -1498,6 +1520,19 @@
 
     const container = document.getElementById('graph-container');
 
+    // Tear down the existing network before wiping its container, otherwise the
+    // vis.Network keeps running against detached DOM and the controls stay wired to it.
+    if (state.network) {
+      state.network.destroy();
+      state.network = null;
+    }
+
+    // Graph controls only apply to the network view.
+    const controls = document.querySelector('.graph-controls');
+    if (controls) {
+      controls.style.display = view === 'network' ? '' : 'none';
+    }
+
     if (view === 'network') {
       container.innerHTML = '';
       buildGraph();
@@ -1506,20 +1541,9 @@
     } else if (view === 'full-tree') {
       container.innerHTML = '';
       if (typeof renderFullPhylogeneticTree === 'function') {
-        let pool = [];
-        if (state.relType === 'genetic') {
-          pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-        } else if (state.relType === 'terpene') {
-          pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-        } else if (state.relType === 'lineage') {
-          pool = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-        } else {
-          const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-          const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-          const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-          pool = [...gen, ...terp, ...lin];
-        }
-        renderFullPhylogeneticTree(container, state.nodes, pool, state.relType);
+        // NOTE: the tree networks are intentionally not stored on state.network —
+        // they use composite node ids, which would break selectNodes(strainName).
+        renderFullPhylogeneticTree(container, state.nodes, getRelPool(state.relType), state.relType);
       }
     }
   }
@@ -1561,6 +1585,9 @@
     const processed = new Set();
     const processedEdges = new Set();
 
+    // Built once — not per visited node.
+    const pool = getRelPool(state.relType);
+
     function addNode(nodeId, level) {
       if (level >= 3 || processed.has(nodeId)) return;
       const node = state.nodes.get(nodeId);
@@ -1572,21 +1599,6 @@
         color: { background: level === 0 ? COLORS.selected.bg : COLORS.complete.bg, border: level === 0 ? COLORS.selected.border : COLORS.complete.border },
         size: 20, font: { color: '#e8e8f0', strokeWidth: 2, strokeColor: '#0a0a14', size: 13 },
       });
-
-      // Determine active pool of relationships
-      let pool = [];
-      if (state.relType === 'genetic') {
-        pool = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-      } else if (state.relType === 'terpene') {
-        pool = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-      } else if (state.relType === 'lineage') {
-        pool = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-      } else { // combined
-        const gen = state.allRelationships.map(r => ({ ...r, type: 'genetic' }));
-        const terp = state.allTerpeneRels.map(r => ({ ...r, type: 'terpene' }));
-        const lin = state.allLineageRels.map(r => ({ ...r, type: 'lineage' }));
-        pool = [...gen, ...terp, ...lin];
-      }
 
       const rels = pool
         .filter(r => (r.from === nodeId || r.to === nodeId) && r.distance < 0.5 && state.nodes.get(r.from === nodeId ? r.to : r.from))
@@ -1601,7 +1613,7 @@
             
             const type = rel.type || (state.allTerpeneRels.some(r => r.from === rel.from && r.to === rel.to) ? 'terpene' : 'genetic');
             const edgeColor = COLORS[type].edge;
-            const titlePrefix = type === 'genetic' ? 'Genetic' : 'Terpene';
+            const titlePrefix = type === 'genetic' ? 'Genetic' : (type === 'lineage' ? 'Lineage' : 'Terpene');
 
             treeEdges.add({
               id: `e_${ek}_${level}`, from: `${nodeId}_${level}`, to: `${childId}_${level + 1}`,
@@ -1627,6 +1639,7 @@
 
   // ── Physics Toggle ──
   function togglePhysics() {
+    if (!state.network) return;
     state.physicsOn = !state.physicsOn;
     if (state.physicsOn) {
       unfreezePositions();
@@ -1656,13 +1669,21 @@
 
   // ── Lineage Tree & Formatting Helpers ──
   function escapeHtml(str) {
-    if (!str) return '';
-    return str
+    if (str === null || str === undefined) return '';
+    return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // Only http(s) URLs may be placed in href/src — blocks javascript:/data: payloads
+  // coming from scraped forum content.
+  function safeUrl(url) {
+    if (!url) return '';
+    const trimmed = String(url).trim();
+    return /^https?:\/\//i.test(trimmed) ? trimmed : '';
   }
 
   function buildLineageData(name, detailLineage, depth = 0) {
